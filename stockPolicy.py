@@ -2,6 +2,7 @@ import tushare as ts
 import openpyxl
 from pandas import DataFrame
 import time
+import mysql.connector
 ts.set_token('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
 pro = ts.pro_api()
 df = pro.query('stock_basic')
@@ -14,21 +15,153 @@ filePath=r'C:\Users\Quan\Documents\stock\celue2018.xlsx'
 
 #def myThread(threadName='', param=''):
 
-#个股检测上涨动能算法：一个月内出现过单日6个点上涨的幅度(A日)。月底较月初上涨，A日过后振幅收窄且量缩（所有交易日的单日量没有一天超过A日总量），
-#一个星期后可以买入，或等再一次涨幅超3个点时介入。
+def loadAllStockBasicsIntoMysql():
+	pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
+	df  = pro.query('stock_basic')
+	stockList = df.ts_code
+	l = len(stockList)
+	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mycsr = mdb.cursor()
+	sql = "insert into st_basic(ts_code,symbol,name,area,list_date) values(%s,%s,%s,%s,%s)"
+	sql2= "select * from st_basic where ts_code=%s"
+	counter=0
+	print(time.ctime(),'-------- processing begin---------------')
+#load all basic table data 
+	for i in range(len(df)):
+		val2= (df.ts_code[i],)
+		mycsr.execute(sql2,val2)
+		rst=mycsr.fetchall()
+		if(len(rst) ==0):
+			tscode= df.ts_code[i]
+			symbol= df.symbol[i]
+			name  = df.name[i]
+			area  = df.area[i]
+			indst = df.industry[i]
+			market= df.market[i]
+			lstdte= df.list_date[i]
+			val =(tscode,symbol,name,area,lstdte)
+			mycsr.execute(sql,val)
+			counter+=1
+		if(i%100 == 99):
+			print(round(i/100)*100, 'records processed...')
+		if(i== len(df) -1):
+			print('All', len(df), 'records processed! added ',counter,' new records')
+	mdb.commit()
+	return stockList
 
-#选出迄今跳空过
-def gettiaokongshangzhangguo(stockList='',startDate='',endDate=''):
+def loadALLStockDailyIntoMysqlAnyway(startDate='',endDate=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
 		return
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 		print('end date is:',endDate)
-	if(stockList is None or stockList == ''):
+	pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
+	df  = pro.query('stock_basic')
+	stockList = df.ts_code
+	l = len(stockList)
+
+	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mycsr = mdb.cursor()
+	sql = "delete from st_daily"
+	sql2="insert into st_daily(trade_date,st_code,openPrice,highest,lowest,closePrice,pre_close,changedValue,pct_chg,vol,amount) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+
+	print(time.ctime(),'-------- processing begin---------------')
+	mycsr.execute(sql)
+	mdb.commit()
+	print(time.ctime(),'-------- table cleared ---------------')
+#load daily transaction data
+	for idx in range(l):
+		hq = ts.pro_bar(ts_code=stockList[idx],adj='qfq',start_date=startDate,end_date=endDate)
+		if (hq is not None):
+			for i in range(len(hq)):
+				trdate= hq.trade_date[i]
+				stcode= hq.ts_code[i]
+				openp = float(hq.open[i])
+				closep= float(hq.close[i])
+				precls= float(hq.pre_close[i])
+				high  = float(hq.high[i])
+				low   = float(hq.low[i])
+				change= float(hq.change[i])
+				pctchg= float(hq.pct_chg[i])
+				vol   = float(hq.vol[i])
+				amount= float(hq.amount[i])
+				val2=(trdate,stcode,openp,high,low,closep,precls,change,pctchg,vol,amount)
+				mycsr.execute(sql2,val2)
+			mdb.commit()
+		if ( idx % 100 == 99):
+			print(time.ctime(), round(idx/100)*100, ' records have been processed....')
+			time.sleep(5)     #睡眠5秒增加每百条记录处理时间，防止1分钟内调用pro_bar接口超过200次而报错
+		if ( idx== l -1):
+			print (time.ctime(), " All records have been processed!!!")
+	print(time.ctime(),'-------- processing end-----------------')
+
+def loadStockDailyIntoMysql(stockList='',startDate='',endDate=''):
+	if(startDate is None or startDate == ''):
+		print('startDate must input')
+		return
+	if(endDate is None or endDate == ''):
+		endDate = time.strftime("%Y%m%d",time.localtime())
+		print('end date is:',endDate)
+	if(len(stockList) == 0 or stockList == ''):
 		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
 		df  = pro.query('stock_basic')
 		stockList = df.ts_code
+	l = len(stockList)
+
+	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mycsr = mdb.cursor()
+	sql = "select * from st_daily where trade_date=%s and st_code=%s"
+	sql2="insert into st_daily(trade_date,st_code,openPrice,highest,lowest,closePrice,pre_close,changedValue,pct_chg,vol,amount) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+
+	print(time.ctime(),'-------- processing begin---------------')
+
+#load daily transaction data
+	for idx in range(l):
+		hq = ts.pro_bar(ts_code=stockList[idx],adj='qfq',start_date=startDate,end_date=endDate)
+		for i in range(len(hq)):
+			val = (hq.trade_date[i],stockList[idx],)
+			mycsr.execute(sql, val)
+			result = mycsr.fetchall()
+			if (len(result) == 0):
+				trdate= hq.trade_date[i]
+				stcode= hq.ts_code[i]
+				openp = float(hq.open[i])
+				closep= float(hq.close[i])
+				precls= float(hq.pre_close[i])
+				high  = float(hq.high[i])
+				low   = float(hq.low[i])
+				change= float(hq.change[i])
+				pctchg= float(hq.pct_chg[i])
+				vol   = float(hq.vol[i])
+				amount= float(hq.amount[i])
+				val2=(trdate,stcode,openp,high,low,closep,precls,change,pctchg,vol,amount)
+				mycsr.execute(sql2,val2)
+		mdb.commit()
+		if ( idx % 100 == 99):
+			print(time.ctime(), round(idx/100)*100, ' records have been processed....')
+			time.sleep(5)     #睡眠5秒增加每百条记录处理时间，防止1分钟内调用pro_bar接口超过200次而报错
+		if ( idx== l -1):
+			print (time.ctime(), " All records have been processed!!!")
+	print(time.ctime(),'-------- processing end-----------------')
+
+
+#个股检测上涨动能算法：一个月内出现过单日6个点上涨的幅度(A日)。月底较月初上涨，A日过后振幅收窄且量缩（所有交易日的单日量没有一天超过A日总量），
+#一个星期后可以买入，或等再一次涨幅超3个点时介入。
+
+#选出迄今跳空过
+def gettiaokongshangzhangguo(startDate='',endDate=''):
+	if(startDate is None or startDate == ''):
+		print('startDate must input')
+		return
+	if(endDate is None or endDate == ''):
+		endDate = time.strftime("%Y%m%d",time.localtime())
+		print('end date is:',endDate)
+	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mycsr = mdb.cursor()
+	sql = "select ts_code from st_basic"
+	mycsr.execute(sql)
+	stockList=mycsr.fetchall()
 	l = len(stockList)
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
@@ -233,30 +366,36 @@ def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 			print (time.ctime(), " All records have been processed!!!")
 	return lstStocks
 
-#获取上涨了multiple倍的股票
-def getFanbeigu(stockList='',startDate='',endDate='',multiple=''):
+#获取上涨了multiple倍的股票,用访问数据库的方式替换之前的方法
+
+def getFanbeigu(startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
-		print('startDate must input')
+		print('startDate must be input')
 		return
 	if(multiple is None or multiple == ''):
-		print('multiple must input'); return
+		print('multiple must be input'); return
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
-	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
-	l = len(stockList)
+
+	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mycsr = mdb.cursor()
+	mycsr.execute("select * from st_basic")
+	result = mycsr.fetchall()
+	l = len(result)
+
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
-		if(hangqing is not None):
-			idx = len(hangqing)
-			if (idx > 1):
-				if (hangqing.close[0]> hangqing.close[idx-1] * multiple):
-					lstMultiple.append(df.ts_code[i])
-					#print(df.ts_code[i],hangqing.close[idx-1], hangqing.close[0])
+		sql="select closePrice from st_daily where st_code =%s and trade_date in(%s,%s)"
+		val =(result[i][0],startDate,endDate)
+		mycsr.execute(sql,val)
+		rst = mycsr.fetchall()
+		if(len(rst) == 2 ):
+			price1 = rst[1][0]
+			price2 = rst[0][0]
+			if (price2> price1 * multiple):
+				lstMultiple.append(result[i][0])
+				print(result[i][0],price1, price2)
 		if ( i % 100 == 99):
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
 		if ( i== l -1):
