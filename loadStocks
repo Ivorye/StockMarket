@@ -21,8 +21,8 @@ def createTable(df=' '):
 	cursor=connectDB()
 	for i in range (0,l):
 		s="gp%s"%df.loc[i].symbol
-		sql="""CREATE TABLE `stockshare`.`%s` (  `trade_date` VARCHAR(8) NOT NULL,`open` FLOAT NOT NULL,`high` FLOAT NOT NULL,\
-		`low` FLOAT NOT NULL,`close` FLOAT NOT NULL,`preclose` FLOAT NOT NULL,`change` FLOAT NOT NULL,`pct_chg` FLOAT NOT NULL,\
+		sql="""CREATE TABLE `stockshare`.`%s` (  `trade_date` VARCHAR(8) NOT NULL,`openp` FLOAT NOT NULL,`high` FLOAT NOT NULL,\
+		`low` FLOAT NOT NULL,`closep` FLOAT NOT NULL,`preclose` FLOAT NOT NULL,`changes` FLOAT NOT NULL,`pct_chg` FLOAT NOT NULL,\
 		`vol` FLOAT NOT NULL,`amount` FLOAT NOT NULL,PRIMARY KEY (`trade_date`),UNIQUE INDEX `trade_date_UNIQUE` (`trade_date` ASC) VISIBLE);""" %(s)
 		try:
 			cursor.execute(sql)
