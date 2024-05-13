@@ -6,14 +6,14 @@ def connectDB():
 		user='root',
 		password='atos1234',
 		database='stockshare')
-	cursor = db.cursor()
+	return db
 
 #每天只能调用5次接口
 def getStockBasic():
 	pro = ts.pro_api("4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9")
 	data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,fullname,area,industry,list_date')
 	df=pd.DataFrame(data)
-	l=len(df)
+	return df
 
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表，注意open、close、change这三个是sql语法里的关键字，不能出现在sql中
 def createStockTable(df=' '):
@@ -36,14 +36,14 @@ def createStockTable(df=' '):
 			print("exception throw")
 
 
-#将所有股票基本信息载入总+表
+#将所有股票基本信息载入总表
 def loadAllBasic(df=' '):
 	l=len(df)
 	db=connectDB()
 	cursor=connectDB()
 	for i in range (0,l):
-		sbl=df.loc[i].symbol
-		sql0="select count(*) from stocks where symbol=%s" %sbl
+		symbol=df.loc[i].symbol
+		sql0="select count(*) from stocks where symbol=%s" %symbol
 		sql="insert into stocks(id,symbol,st_code,fullname,list_date) values('%s','%s','%s','%s','%s')" %(i+1,df.loc[i].symbol,df.loc[i].ts_code,df.loc[i].fullname,df.loc[i].list_date)
 		quantity = cursor.execute(sql0)
 		if quantity == 0:
@@ -102,29 +102,30 @@ def insertNewTransactonRecordForAllStocks(df='',start_date='',end_date=''):
 	db.close()
 
 
-#获取阶段涨幅大于
-def getJDZF():
+#获取给定日期段内阶段涨幅大于rate的股票，返回一个股票列表list
+def getJDZF(df='',start_date='',end_date='',rate=''):
+	l=len(df)
+	lst=[]
 	for i in range(0,l):
-	ss=df.loc[i].symbol
-	s="gp%s"%ss
-	sql="select closep from %s where trade_date = '20231201';" %s
-	sql2="select closep from %s where trade_date = '20240308';" %s
-	try:
-		cursor.execute(sql)
-		p1 = cursor.fetchall()
-		cursor.execute(sql2)
-		p2 = cursor.fetchall()
-		p3 = p1[0][0]
-		p4 = p2[0][0]
-		if p4>p3*1.26:
-			lst.append(ss)
-		x = i%50
-		if x == 0:
-			db.commit()
-			print(i, " records processed")
-		if i==l-1:
-			db.commit()
-			print(i, "All records processed")
-	except:
-		print("exception throw")
-		db.rollback()
+		symbol=df.loc[i].symbol
+		table="gp%s"%symbol
+		sql="select closep from %s where trade_date = %s;" %(table,start_date)
+		sql2="select closep from %s where trade_date = %s;" %(table,end_date)
+		try:
+			cursor.execute(sql)
+			p1 = cursor.fetchall()
+			cursor.execute(sql2)
+			p2 = cursor.fetchall()
+			p3 = p1[0][0]
+			p4 = p2[0][0]
+			ratio=1+rate/100
+			if p4>p3*ratio:
+				lst.append(symbol)
+			x = i%500
+			if x == 0:
+				print(i, " records processed")
+			if i==l-1:
+				print(i, "All records processed")
+		except:
+			print("exception throw")
+	return lst
