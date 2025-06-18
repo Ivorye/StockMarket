@@ -4,7 +4,7 @@ import pymysql, pandas as pd, tushare as ts
 def connectDB():
 	db=pymysql.connect(host='localhost',
 		user='root',
-		password='atos1234',
+		password='P@ssw0rd',
 		database='stockshare')
 	return db
 
@@ -40,7 +40,7 @@ def createStockTable(df=' '):
 def loadAllBasic(df=' '):
 	l=len(df)
 	db=connectDB()
-	cursor=connectDB()
+	cursor=db.cursor()
 	for i in range (0,l):
 		symbol=df.loc[i].symbol
 		sql0="select count(*) from stocks where symbol=%s" %symbol
