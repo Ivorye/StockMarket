@@ -1,4 +1,5 @@
 import pymysql, pandas as pd, tushare as ts
+import time
 
 #返回cursor.需要依赖本地已建立数据库schema（stockshare）
 def connectDB():
@@ -16,10 +17,9 @@ def getStockBasic():
 	return df
 
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表，注意open、close、change这三个是sql语法里的关键字，不能出现在sql中
-def createStockTable(df=' '):
+def createStockTable(df=' ', db=' '):
 	l=len(df)
-	db=connectDB()
-	cursor=connectDB()
+	cursor=db.cursor()
 	for i in range (0,l):
 		s="gp%s"%df.loc[i].symbol
 		sql="""CREATE TABLE `stockshare`.`%s` (  `trade_date` VARCHAR(8) NOT NULL,`openp` FLOAT NOT NULL,`high` FLOAT NOT NULL,\
@@ -28,7 +28,7 @@ def createStockTable(df=' '):
 		try:
 			cursor.execute(sql)
 			x = i%50
-			if x == 0:
+			if x == 0 & i!=0:
 				print(i, " tables have been created")
 			if i==l-1:
 				print(i, " All tables have been created")
@@ -37,9 +37,8 @@ def createStockTable(df=' '):
 
 
 #将所有股票基本信息载入总表
-def loadAllBasic(df=' '):
+def loadAllBasic(df=' ', db=' '):
 	l=len(df)
-	db=connectDB()
 	cursor=db.cursor()
 	for i in range (0,l):
 		symbol=df.loc[i].symbol
@@ -50,7 +49,7 @@ def loadAllBasic(df=' '):
 			try:
 				cursor.execute(sql)
 				x = i%50
-				if x == 0:
+				if x == 0 & i!=0:
 					db.commit()
 					print(i, " records have been loaded to database")
 				if i==l-1:
@@ -67,9 +66,8 @@ def loadAllBasic(df=' '):
 	# data=pro.daily(ts_code=df.loc[k].ts_code,start_date='20230104',end_date='20240308')
 	# s="gp%s"%df.loc[k].symbol
 #输入：DF数据帧，开始日期和结束日期。在此之间的交易记录导入数据库
-def insertNewTransactonRecordForAllStocks(df='',start_date='',end_date=''):
+def insertNewTransactonRecordForAllStocks(df='',start_date='',end_date='',db=''):
 	l=len(df)
-	db=connectDB()
 	cursor = db.cursor()
 	pro = ts.pro_api("4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9")
 	for k in range(0,l):
@@ -82,9 +80,9 @@ def insertNewTransactonRecordForAllStocks(df='',start_date='',end_date=''):
 			result=cursor.execute(sql0)
 			if result==0:
 				try:
-					cursor.execute(sql)
+					rst = cursor.execute(sql)
 					x = i%50
-					if x == 0:
+					if x == 0 & i!=0:
 						db.commit()
 						print(i, " records have been loaded to database")
 					if i==ln-1:
@@ -94,18 +92,19 @@ def insertNewTransactonRecordForAllStocks(df='',start_date='',end_date=''):
 					print("exception throw")
 					db.rollback()
 		kk=k%50
-		if kk == 0:
-			print(kk, " tables have been processed")
+		if kk == 0 & k !=0:
+			print(k, " tables have been processed")
 		if k == l-1:
-			print(kk, " All tables have been processed")
-
+			print(k, " All tables have been processed")
+        time.sleep(5)
 	db.close()
 
 
 #获取给定日期段内阶段涨幅大于rate的股票，返回一个股票列表list
-def getJDZF(df='',start_date='',end_date='',rate=''):
+def getJDZF(df='',start_date='',end_date='',rate='',db=''):
 	l=len(df)
 	lst=[]
+	cursor = db.cursor()
 	for i in range(0,l):
 		symbol=df.loc[i].symbol
 		table="gp%s"%symbol

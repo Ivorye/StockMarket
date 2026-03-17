@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
+import pymysql, pandas as pd, tushare as ts, loadStocks as ld
+
 
 app = FastAPI(title="示例 FastAPI 服务")
 
 class Item(BaseModel):
     name: str
-description: Optional[str] = None
-price: float
-tax: Optional[float] = None
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
 
 @app.get("/", tags=["home"])
 async def read_root():
