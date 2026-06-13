@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
-import pymysql, pandas as pd, tushare as ts, loadStocks as ld
+import pymysql, pandas as pd, tushare as ts
 
 
 app = FastAPI(title="示例 FastAPI 服务")

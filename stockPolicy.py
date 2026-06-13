@@ -434,7 +434,7 @@ def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 	return lstMultiple;
 
 
-def getStockListByVolumeChange(stockList='',startDate='',endDate='',multiple=''):
+def getStockListByVolumeChange2(stockList='',startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
 		return
