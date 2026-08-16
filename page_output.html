@@ -1,0 +1,121 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>放量涨幅筛选</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 22px; margin-bottom: 8px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+        .controls input[type="text"] { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 130px; }
+        .controls button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #1677ff; color: #fff; }
+        .btn-primary:hover { background: #4096ff; }
+        .btn-run { background: #52c41a; color: #fff; }
+        .btn-run:hover { background: #73d13d; }
+        .btn-run:disabled { background: #b7eb8f; cursor: not-allowed; }
+        .stats { display: flex; gap: 24px; margin-bottom: 20px; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 16px 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); min-width: 140px; }
+        .stat-card .label { font-size: 13px; color: #888; }
+        .stat-card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+        .stat-card .value.red { color: #ff4d4f; }
+        .stat-card .value.blue { color: #1677ff; }
+        table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+        th { background: #fafafa; padding: 12px 16px; text-align: left; font-size: 13px; color: #666; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+        td { padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+        tr:hover { background: #f5f5f5; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+        .tag-red { background: #fff1f0; color: #cf1322; }
+        .tag-orange { background: #fff7e6; color: #d46b08; }
+        .tag-green { background: #f6ffed; color: #389e0d; }
+        .empty { text-align: center; padding: 60px; color: #bbb; font-size: 15px; }
+        .msg { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+        .msg-ok { background: #f6ffed; border: 1px solid #b7eb8f; color: #389e0d; }
+        .msg-err { background: #fff1f0; border: 1px solid #ffa39e; color: #cf1322; }
+        .loading { display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top-color: transparent; border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 6px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .code { font-family: "Cascadia Code", "Consolas", monospace; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>放量涨幅筛选</h1>
+    <p class="subtitle">成交量 &ge; 前日 3 倍 且 涨幅 &gt; 6% 的股票信号</p>
+
+    
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="label">信号总数</div>
+            <div class="value red">1</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">最新交易日</div>
+            <div class="value blue" style="font-size:20px;">20240520</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">最大量比</div>
+            <div class="value" style="color:#fa8c16;">7.48</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <form method="get" action="/" style="display:flex;gap:12px;align-items:center;">
+            <label style="font-size:14px;">起始日期:</label>
+            <input type="text" name="start" placeholder="20260101" value="20240101" />
+            <label style="font-size:14px;">结束日期:</label>
+            <input type="text" name="end" placeholder="20260815" value="20240520" />
+            <button type="submit" class="btn-primary">查询</button>
+        </form>
+        <form method="post" action="/run-screener" style="display:inline;">
+            <input type="hidden" name="start" value="20240101" />
+            <input type="hidden" name="end" value="20240520" />
+            <button type="submit" class="btn-run" id="runBtn">执行筛选</button>
+        </form>
+    </div>
+
+    
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>股票代码</th>
+                <th>交易日期</th>
+                <th>收盘价</th>
+                <th>涨幅(%)</th>
+                <th>当日成交量</th>
+                <th>前日成交量</th>
+                <th>量比</th>
+            </tr>
+        </thead>
+        <tbody>
+            
+            <tr>
+                <td>1</td>
+                <td class="code">000056.SZ</td>
+                <td class="code">20240520</td>
+                <td>2.63</td>
+                <td>
+                    
+                        <span class="tag tag-orange">6.48%</span>
+                    
+                </td>
+                <td>1736490</td>
+                <td>232115</td>
+                <td>
+                    
+                        <span class="tag tag-red">7.48x</span>
+                    
+                </td>
+            </tr>
+            
+        </tbody>
+    </table>
+    
+</div>
+</body>
+</html>
