@@ -28,17 +28,12 @@ def run_daily_update():
 
     # 步骤1：获取股票列表（优先从数据库读取，避免消耗stock_basic API配额）
     logger.info("[1/4] 获取股票列表...")
-    df = ld.getStockBasicFromDB()
-    if df is not None:
-        logger.info(f"从数据库读取到 {len(df)} 只股票基本信息（跳过API调用）")
-    else:
-        logger.info("数据库为空，从API获取最新股票列表 (getStockBasic)...")
-        try:
-            df = ld.getStockBasic()
-            logger.info(f"从API获取到 {len(df)} 只股票基本信息")
-        except Exception as e:
-            logger.error(f"getStockBasic 执行失败: {e}")
-            return
+    try:
+        df = ld.getStockBasic()
+        logger.info(f"从API获取到 {len(df)} 只股票基本信息")
+    except Exception as e:
+        logger.error(f"getStockBasic 执行失败: {e}")
+        return
 
     # 步骤2：将所有股票基本信息载入总表
     logger.info("[2/4] 载入股票基本信息到总表 (loadAllBasic)...")

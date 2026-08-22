@@ -331,6 +331,36 @@ def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 	return lstMultiple
 
 
+#筛选区间内涨幅超过指定百分比的股票，排除科创板/ST/次新股
+def getZhangFu(startDate='', endDate='', pct=30):
+	if(startDate is None or startDate == ''):
+		print('startDate must input')
+		return []
+	if(endDate is None or endDate == ''):
+		endDate = time.strftime("%Y%m%d", time.localtime())
+	df = _get_stock_basic()
+	stockList = df.ts_code
+	l = len(stockList)
+	lst = []
+	print(time.ctime(), '-------- processing begin---------------')
+	for i in range(l):
+		if(not _should_skip(df, i, startDate)):
+			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			if hangqing is not None and len(hangqing) > 1:
+				idx = len(hangqing)
+				change = round((hangqing.close[0] - hangqing.close[idx-1]) / hangqing.close[idx-1] * 100, 2)
+				if change >= pct:
+					lst.append((df.ts_code[i], change))
+					print(df.ts_code[i], f'{change}%')
+		if(i % 100 == 99):
+			print(time.ctime(), round(i/100)*100, ' records have been processed....')
+		if(i == l - 1):
+			print(time.ctime(), " All records have been processed!!!")
+	print(time.ctime(), '-------- processing end-----------------')
+	lst.sort(key=lambda x: x[1], reverse=True)
+	return [item[0] for item in lst]
+
+
 #6个点代表强势，相对于T-1或T-2日放量2倍以上且涨超6个点，寻找这样的股票。西藏珠峰7.2日启动，中泰股份20210826晚关注到
 
 #获取Excel里的股票list，返回一个list出去

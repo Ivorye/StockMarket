@@ -34,7 +34,7 @@ def run_all_strategies():
     results = {}
 
     # 策略1: 巨量上涨（放量>=2倍且涨超4%，之后缩量调整振幅<3%）
-    logger.info("--- [1/4] 巨量上涨筛选 ---")
+    logger.info("--- [1/5] 巨量上涨筛选 ---")
     try:
         r = sp.getJuliangshangzhang(startDate=start_date, endDate=end_date, multiple=2)
         results['巨量上涨'] = r
@@ -43,7 +43,7 @@ def run_all_strategies():
         logger.error(f"巨量上涨筛选失败: {e}")
 
     # 策略2: 向上跳空缺口
-    logger.info("--- [2/4] 向上跳空缺口筛选 ---")
+    logger.info("--- [2/5] 向上跳空缺口筛选 ---")
     try:
         r = sp.getxiangshangtiaokongquekou(startDate=start_date, endDate=end_date)
         results['向上跳空缺口'] = r
@@ -52,7 +52,7 @@ def run_all_strategies():
         logger.error(f"向上跳空缺口筛选失败: {e}")
 
     # 策略3: 跳空上涨过（含量能确认）
-    logger.info("--- [3/4] 跳空上涨筛选 ---")
+    logger.info("--- [3/5] 跳空上涨筛选 ---")
     try:
         r = sp.gettiaokongshangzhangguo(startDate=start_date, endDate=end_date)
         results['跳空上涨'] = r
@@ -61,13 +61,22 @@ def run_all_strategies():
         logger.error(f"跳空上涨筛选失败: {e}")
 
     # 策略4: 放量日（当日成交量>=前日3倍）
-    logger.info("--- [4/4] 放量日筛选 ---")
+    logger.info("--- [4/5] 放量日筛选 ---")
     try:
         r = sp.getFangliangDay0(startDate=start_date, endDate=end_date, multiple=3)
         results['放量日'] = r
         logger.info(f"放量日: {len(r)} 只")
     except Exception as e:
         logger.error(f"放量日筛选失败: {e}")
+
+    # 策略5: 区间涨幅超30%
+    logger.info("--- [5/5] 区间涨幅筛选 ---")
+    try:
+        r = sp.getZhangFu(startDate=start_date, endDate=end_date, pct=30)
+        results['区间涨幅30%'] = r
+        logger.info(f"区间涨幅30%: {len(r)} 只")
+    except Exception as e:
+        logger.error(f"区间涨幅筛选失败: {e}")
 
     # 汇总输出
     logger.info("========== 策略筛选结果汇总 ==========")
