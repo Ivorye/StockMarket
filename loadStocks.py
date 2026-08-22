@@ -1,4 +1,4 @@
-import pymysql, pandas as pd, tushare as ts
+import pymysql, pandas as pd, tushare as ts, time
 
 TUSHARE_TOKEN = "4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9"
 
@@ -19,6 +19,19 @@ def getStockBasic():
 	pro = ts.pro_api(TUSHARE_TOKEN)
 	data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,fullname,area,industry,list_date')
 	df=pd.DataFrame(data)
+	return df
+
+#从数据库stocks表读取股票列表（避免重复调用stock_basic API）
+#返回与getStockBasic相同结构的DataFrame，若表为空返回None
+def getStockBasicFromDB():
+	db=connectDB()
+	cursor=db.cursor()
+	cursor.execute("SELECT symbol, st_code AS ts_code, fullname, list_date FROM stocks")
+	rows = cursor.fetchall()
+	db.close()
+	if not rows:
+		return None
+	df = pd.DataFrame(rows, columns=['symbol','ts_code','fullname','list_date'])
 	return df
 
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表
@@ -85,7 +98,12 @@ def insertNewTransactonRecordForAllStocks(df=None,start_date='',end_date=''):
 	cursor=db.cursor()
 	pro = ts.pro_api(TUSHARE_TOKEN)
 	for k in range(0,l):
-		data=pro.daily(ts_code=df.loc[k].ts_code,start_date=start_date,end_date=end_date)
+		try:
+			data=pro.daily(ts_code=df.loc[k].ts_code,start_date=start_date,end_date=end_date)
+		except Exception as e:
+			print("获取日线数据异常 %s: %s" % (df.loc[k].ts_code, e))
+			time.sleep(5)
+			continue
 		if data is None or len(data) == 0:
 			continue
 		table=_escape_table_name("gp%s" % df.loc[k].symbol)
@@ -122,6 +140,7 @@ def insertNewTransactonRecordForAllStocks(df=None,start_date='',end_date=''):
 			print(k, " tables have been processed")
 		if k == l-1:
 			print(k, " All tables have been processed")
+		time.sleep(1.5)  # 限速：pro.daily()限制50次/分钟
 	db.close()
 
 

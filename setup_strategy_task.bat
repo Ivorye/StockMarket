@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   注册 Windows 定时任务：每日股票数据更新
+echo   注册 Windows 定时任务：每日全策略筛选
 echo ========================================
 echo.
 
@@ -23,35 +23,35 @@ if not exist "%PYTHON_PATH%" (
 
 echo 项目目录: %PROJECT_DIR%
 echo Python路径: %PYTHON_PATH%
-echo 任务名称: StockDailyUpdate
-echo 执行时间: 每日 20:00
+echo 任务名称: StockRunStrategies
+echo 执行时间: 每日 00:00
 echo.
 
 :: 删除已有任务（如果存在）
-schtasks /delete /tn "StockDailyUpdate" /f >nul 2>&1
+schtasks /delete /tn "StockRunStrategies" /f >nul 2>&1
 
 :: 创建定时任务
 schtasks /create ^
-    /tn "StockDailyUpdate" ^
-    /tr "\"%PYTHON_PATH%\" \"%PROJECT_DIR%\dailyUpdate.py\"" ^
+    /tn "StockRunStrategies" ^
+    /tr "\"%PYTHON_PATH%\" \"%PROJECT_DIR%\runAllStrategies.py\"" ^
     /sc daily ^
-    /st 20:00 ^
+    /st 00:00 ^
     /rl HIGHEST ^
     /f
 
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [成功] 定时任务已注册！
-    echo 任务将在每日 20:00 自动执行 dailyUpdate.py
+    echo 任务将在每日 00:00 自动执行 runAllStrategies.py
     echo.
     echo 可通过以下命令查看任务状态：
-    echo   schtasks /query /tn "StockDailyUpdate" /v
+    echo   schtasks /query /tn "StockRunStrategies" /v
     echo.
     echo 可通过以下命令手动触发：
-    echo   schtasks /run /tn "StockDailyUpdate"
+    echo   schtasks /run /tn "StockRunStrategies"
     echo.
     echo 可通过以下命令删除任务：
-    echo   schtasks /delete /tn "StockDailyUpdate" /f
+    echo   schtasks /delete /tn "StockRunStrategies" /f
 ) else (
     echo.
     echo [错误] 定时任务注册失败！
