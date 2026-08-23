@@ -3,30 +3,54 @@ import openpyxl
 from pandas import DataFrame
 import time
 import mysql.connector
-ts.set_token('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-pro = ts.pro_api()
-df = pro.query('stock_basic')
-stockList = df.ts_code
-'stocks = stockList.array'
-startDate = '20180104'
-endDate   = '20181231'
-valveRate = 50.00
-filePath=r'C:\Users\Quan\Documents\stock\celue2018.xlsx'
+
+TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
+
+#延迟加载：首次调用时获取全量股票基本信息，之后缓存
+_basic_cache = None
+def _get_stock_basic():
+	global _basic_cache
+	if _basic_cache is None:
+		pro = ts.pro_api(TUSHARE_TOKEN)
+		_basic_cache = pro.query('stock_basic')
+	return _basic_cache
+
+def _connect_sm():
+	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare')
+
+#通用筛选条件：剔除科创板(688)、ST、*ST、次新股(2021年后上市且上市晚于startDate)
+def _should_skip(df, i, startDate=''):
+	sym = df.symbol[i]
+	name = df.name[i]
+	lst = df.list_date[i]
+	if sym[0:3] == '688':
+		return True
+	if name[0:2] == 'ST' or name[0:2] == '*S':
+		return True
+	#原逻辑：list_date < '20210101' AND list_date < startDate 两个条件同时满足才不排除
+	if lst >= '20210101' and (not startDate or lst >= startDate):
+		return True
+	return False
+
+#获取默认股票列表
+def _default_stock_list():
+	df = _get_stock_basic()
+	return df.ts_code
 
 #def myThread(threadName='', param=''):
 
 def loadAllStockBasicsIntoMysql():
-	pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
+	pro = ts.pro_api(TUSHARE_TOKEN)
 	df  = pro.query('stock_basic')
 	stockList = df.ts_code
 	l = len(stockList)
-	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
+	mdb=_connect_sm()
 	mycsr = mdb.cursor()
 	sql = "insert into st_basic(ts_code,symbol,name,area,list_date) values(%s,%s,%s,%s,%s)"
 	sql2= "select * from st_basic where ts_code=%s"
 	counter=0
 	print(time.ctime(),'-------- processing begin---------------')
-#load all basic table data 
+#load all basic table data
 	for i in range(len(df)):
 		val2= (df.ts_code[i],)
 		mycsr.execute(sql2,val2)
@@ -47,104 +71,9 @@ def loadAllStockBasicsIntoMysql():
 		if(i== len(df) -1):
 			print('All', len(df), 'records processed! added ',counter,' new records')
 	mdb.commit()
+	mycsr.close()
+	mdb.close()
 	return stockList
-
-def loadALLStockDailyIntoMysqlAnyway(startDate='',endDate=''):
-	if(startDate is None or startDate == ''):
-		print('startDate must input')
-		return
-	if(endDate is None or endDate == ''):
-		endDate = time.strftime("%Y%m%d",time.localtime())
-		print('end date is:',endDate)
-	pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-	df  = pro.query('stock_basic')
-	stockList = df.ts_code
-	l = len(stockList)
-
-	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
-	mycsr = mdb.cursor()
-	sql = "delete from st_daily"
-	sql2="insert into st_daily(trade_date,st_code,openPrice,highest,lowest,closePrice,pre_close,changedValue,pct_chg,vol,amount) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-
-	print(time.ctime(),'-------- processing begin---------------')
-	mycsr.execute(sql)
-	mdb.commit()
-	print(time.ctime(),'-------- table cleared ---------------')
-#load daily transaction data
-	for idx in range(l):
-		hq = ts.pro_bar(ts_code=stockList[idx],adj='qfq',start_date=startDate,end_date=endDate)
-		if (hq is not None):
-			for i in range(len(hq)):
-				trdate= hq.trade_date[i]
-				stcode= hq.ts_code[i]
-				openp = float(hq.open[i])
-				closep= float(hq.close[i])
-				precls= float(hq.pre_close[i])
-				high  = float(hq.high[i])
-				low   = float(hq.low[i])
-				change= float(hq.change[i])
-				pctchg= float(hq.pct_chg[i])
-				vol   = float(hq.vol[i])
-				amount= float(hq.amount[i])
-				val2=(trdate,stcode,openp,high,low,closep,precls,change,pctchg,vol,amount)
-				mycsr.execute(sql2,val2)
-			mdb.commit()
-		if ( idx % 100 == 99):
-			print(time.ctime(), round(idx/100)*100, ' records have been processed....')
-			time.sleep(5)     #睡眠5秒增加每百条记录处理时间，防止1分钟内调用pro_bar接口超过200次而报错
-		if ( idx== l -1):
-			print (time.ctime(), " All records have been processed!!!")
-	print(time.ctime(),'-------- processing end-----------------')
-
-def loadStockDailyIntoMysql(stockList='',startDate='',endDate=''):
-	if(startDate is None or startDate == ''):
-		print('startDate must input')
-		return
-	if(endDate is None or endDate == ''):
-		endDate = time.strftime("%Y%m%d",time.localtime())
-		print('end date is:',endDate)
-	if(len(stockList) == 0 or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
-	l = len(stockList)
-
-	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
-	mycsr = mdb.cursor()
-	sql = "select * from st_daily where trade_date=%s and st_code=%s"
-	sql2="insert into st_daily(trade_date,st_code,openPrice,highest,lowest,closePrice,pre_close,changedValue,pct_chg,vol,amount) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-
-	print(time.ctime(),'-------- processing begin---------------')
-
-#load daily transaction data
-	for idx in range(l):
-		hq = ts.pro_bar(ts_code=stockList[idx],adj='qfq',start_date=startDate,end_date=endDate)
-		for i in range(len(hq)):
-			val = (hq.trade_date[i],stockList[idx],)
-			mycsr.execute(sql, val)
-			result = mycsr.fetchall()
-			if (len(result) == 0):
-				trdate= hq.trade_date[i]
-				stcode= hq.ts_code[i]
-				openp = float(hq.open[i])
-				closep= float(hq.close[i])
-				precls= float(hq.pre_close[i])
-				high  = float(hq.high[i])
-				low   = float(hq.low[i])
-				change= float(hq.change[i])
-				pctchg= float(hq.pct_chg[i])
-				vol   = float(hq.vol[i])
-				amount= float(hq.amount[i])
-				val2=(trdate,stcode,openp,high,low,closep,precls,change,pctchg,vol,amount)
-				mycsr.execute(sql2,val2)
-		mdb.commit()
-		if ( idx % 100 == 99):
-			print(time.ctime(), round(idx/100)*100, ' records have been processed....')
-			time.sleep(5)     #睡眠5秒增加每百条记录处理时间，防止1分钟内调用pro_bar接口超过200次而报错
-		if ( idx== l -1):
-			print (time.ctime(), " All records have been processed!!!")
-	print(time.ctime(),'-------- processing end-----------------')
-
 
 #个股检测上涨动能算法：一个月内出现过单日6个点上涨的幅度(A日)。月底较月初上涨，A日过后振幅收窄且量缩（所有交易日的单日量没有一天超过A日总量），
 #一个星期后可以买入，或等再一次涨幅超3个点时介入。
@@ -153,30 +82,28 @@ def loadStockDailyIntoMysql(stockList='',startDate='',endDate=''):
 def gettiaokongshangzhangguo(startDate='',endDate=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
+		return []
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 		print('end date is:',endDate)
-	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
-	mycsr = mdb.cursor()
-	sql = "select ts_code from st_basic"
-	mycsr.execute(sql)
-	stockList=mycsr.fetchall()
+	df = _get_stock_basic()
+	stockList = df.ts_code
 	l = len(stockList)
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101' 
-		and df.list_date[i] < startDate):
+		if (not _should_skip(df, i, startDate)):
 			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			if hangqing is None:
+				continue
 			idx = len(hangqing)
 			if (idx > 3):
 				x = 0
 				for j in range(idx-1):
 					volChange = ( hangqing.vol[j] / hangqing.vol[j + 1] )
 					if (hangqing.close[0]>hangqing.close[idx-1]*1.3
-					and (hangqing.low[j]>hangqing.high[j+1] 
-					or (hangqing.open[j+1]<hangqing.close[j+1]<hangqing.open[j] 
+					and (hangqing.low[j]>hangqing.high[j+1]
+					or (hangqing.open[j+1]<hangqing.close[j+1]<hangqing.open[j]
 					and volChange>2.5))):
 						x = 1
 						break
@@ -194,29 +121,29 @@ def gettiaokongshangzhangguo(startDate='',endDate=''):
 def getJuliangshangzhang(stockList='',startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
+		return []
 	if(multiple is None or multiple == ''):
 		multiple = 2;print('multiple is ', multiple)
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
+		stockList = _default_stock_list()
+	df = _get_stock_basic()
 	l = len(stockList)
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101' 
-		and df.list_date[i] < startDate):
+		if (not _should_skip(df, i, startDate)):
 			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			if hangqing is None:
+				continue
 			idx = len(hangqing)
 			if (idx > 3):
 				x = 0
 				for j in range(idx-1):
 					volChange = ( hangqing.vol[j] / hangqing.vol[j + 1] )
-					if (volChange >= multiple and j > 2 
-					and hangqing.open[j]>hangqing.close[j+1] 
+					if (volChange >= multiple and j > 2
+					and hangqing.open[j]>hangqing.close[j+1]
 					and hangqing.pct_chg[j]>4
 					and ( hangqing.close[j-1]>hangqing.close[j] and -3 < hangqing.pct_chg[j-1]<3 and hangqing.vol[j] >= hangqing.vol[j-1]*multiple
 					or hangqing.close[j-2]> hangqing.close[j] and -3 <hangqing.pct_chg[j-2]<3 and hangqing.vol[j] >= hangqing.vol[j-2]*multiple)
@@ -238,25 +165,25 @@ def getJuliangshangzhang(stockList='',startDate='',endDate='',multiple=''):
 def getxiangshangtiaokongquekou(stockList='',startDate='',endDate=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
+		return []
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime());print('endDate is ', endDate)
 	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
+		stockList = _default_stock_list()
+	df = _get_stock_basic()
 	l = len(stockList)
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101' 
-		and df.list_date[i] < startDate):
+		if (not _should_skip(df, i, startDate)):
 			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			if hangqing is None:
+				continue
 			idx = len(hangqing)
 			if (idx > 3):
 				x = 0
 				volChange = ( hangqing.vol[0] / hangqing.vol[1] )
-				if (hangqing.low[0] > hangqing.high[1] 
+				if (hangqing.low[0] > hangqing.high[1]
 				and hangqing.close[0] > hangqing.close[idx-1]):
 					x = 1
 				if (x == 1):
@@ -270,48 +197,56 @@ def getxiangshangtiaokongquekou(stockList='',startDate='',endDate=''):
 	return lstMultiple
 
 def getStockListByFluxRate(startDate='',endDate='',fluxRate='',filePath=''):
+	if(startDate is None or startDate == ''):
+		print('startDate must input')
+		return
+	if(endDate is None or endDate == ''):
+		endDate = time.strftime("%Y%m%d",time.localtime())
+	if(fluxRate is None or fluxRate == ''):
+		fluxRate = 50.00
+	df = _get_stock_basic()
+	stockList = df.ts_code
 	l = len(stockList)
 	fluxs={}
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101'):
+		if (not _should_skip(df, i)):
 			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
 			if (hangqing is not None):
 				idx = len(hangqing)
 				if (idx > 1):
 					flux = ( hangqing.close[0] - hangqing.close[idx-1] ) / hangqing.close[idx-1] * 100
 					flux2 = round(flux,2)
-					if (flux2 >= valveRate):
+					if (flux2 >= fluxRate):
 						fluxs[df.ts_code[i]] = flux2
 		if ( i % 100 == 99):
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
-					
+
 
 	print(time.ctime(),'-------- processing ended---------------')
-	flxs=sorted(fluxs.items(),key=lambda fluxs:fluxs[1],reverse = True)
-	df = DataFrame(flxs)
-	df.to_excel(filePath)
+	flxs=sorted(fluxs.items(),key=lambda x:x[1],reverse = True)
+	resultDf = DataFrame(flxs)
+	resultDf.to_excel(filePath)
 
 #选出曾经有过巨量上涨记录的股票，
 def getStockListByVolumeChange(stockList='',startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
+		return []
 	if(multiple is None or multiple == ''):
 		print('multiple must input')
+		return []
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
+		stockList = _default_stock_list()
 	l = len(stockList)
 	lstStocks=[]
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-#		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101' 
+#		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101'
 #		and df.list_date[i] < startDate):
 		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
 		if(hangqing is not None):
@@ -335,13 +270,13 @@ def getStockListByVolumeChange(stockList='',startDate='',endDate='',multiple='')
 
 def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
-		print('startDate must input'); return
+		print('startDate must input'); return []
 	if(multiple is None or multiple == ''):
-		print('multiple must input');return
+		print('multiple must input');return []
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 	if(stockList is None or stockList == ''):
-		print('stockList must input');return
+		print('stockList must input');return []
 	l = len(stockList)
 	lstStocks=[]
 	print(time.ctime(),'-------- processing begin---------------')
@@ -352,7 +287,7 @@ def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 			if (idx >= 9):
 				x = 0
 				for j in range(5):
-					if(hangqing.vol[j + 1] > hangqing.vol[0] * multiple 
+					if(hangqing.vol[j + 1] > hangqing.vol[0] * multiple
 					and (hangqing.vol[j + 1] > hangqing.vol[j+2] * 2.5 or hangqing.vol[j + 1] > hangqing.vol[j+3] * 2.5 or hangqing.vol[j + 1] > hangqing.vol[j+4] * 2.5)
 					and hangqing.pct_chg [j+1] > 4
 					and hangqing.close[0] > hangqing.close[idx-1]
@@ -366,56 +301,18 @@ def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 			print (time.ctime(), " All records have been processed!!!")
 	return lstStocks
 
-#获取上涨了multiple倍的股票,用访问数据库的方式替换之前的方法
-
-def getFanbeigu(startDate='',endDate='',multiple=''):
-	if(startDate is None or startDate == ''):
-		print('startDate must be input')
-		return
-	if(multiple is None or multiple == ''):
-		print('multiple must be input'); return
-	if(endDate is None or endDate == ''):
-		endDate = time.strftime("%Y%m%d",time.localtime())
-
-	mdb=mysql.connector.connect(host="localhost",user="root",passwd="1234",database='sm')
-	mycsr = mdb.cursor()
-	mycsr.execute("select * from st_basic")
-	result = mycsr.fetchall()
-	l = len(result)
-
-	lstMultiple = []
-	print(time.ctime(),'-------- processing begin---------------')
-	for i in range(l):
-		sql="select closePrice from st_daily where st_code =%s and trade_date in(%s,%s)"
-		val =(result[i][0],startDate,endDate)
-		mycsr.execute(sql,val)
-		rst = mycsr.fetchall()
-		if(len(rst) == 2 ):
-			price1 = rst[1][0]
-			price2 = rst[0][0]
-			if (price2> price1 * multiple):
-				lstMultiple.append(result[i][0])
-				print(result[i][0],price1, price2)
-		if ( i % 100 == 99):
-			print(time.ctime(), round(i/100)*100, ' records have been processed....')
-		if ( i== l -1):
-			print (time.ctime(), " All records have been processed!!!")
-	print(time.ctime(),'-------- processing end-----------------')
-	return lstMultiple;
-
 #获取放量股票，当日放量倍数由multiple确定
 def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
+		return []
 	if(multiple is None or multiple == ''):
 		print('multiple must input')
+		return []
 	if(endDate is None or endDate == ''):
 		endDate = time.strftime("%Y%m%d",time.localtime())
 	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
+		stockList = _default_stock_list()
 	l = len(stockList)
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
@@ -425,53 +322,43 @@ def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 			idx = len(hangqing)
 			if (idx > 1):
 				if (hangqing.vol[0]> hangqing.vol[1] * multiple):
-					lstMultiple.append(df.ts_code[i])
+					lstMultiple.append(stockList[i])
 		if ( i % 100 == 99):
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
 	print(time.ctime(),'-------- processing end-----------------')
-	return lstMultiple;
+	return lstMultiple
 
 
-def getStockListByVolumeChange2(stockList='',startDate='',endDate='',multiple=''):
+#筛选区间内涨幅超过指定百分比的股票，排除科创板/ST/次新股
+def getZhangFu(startDate='', endDate='', pct=30):
 	if(startDate is None or startDate == ''):
 		print('startDate must input')
-		return
-	if(multiple is None or multiple == ''):
-		print('multiple must input')
+		return []
 	if(endDate is None or endDate == ''):
-		endDate = time.strftime("%Y%m%d",time.localtime())
-	if(stockList is None or stockList == ''):
-		pro = ts.pro_api('4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9')
-		df  = pro.query('stock_basic')
-		stockList = df.ts_code
+		endDate = time.strftime("%Y%m%d", time.localtime())
+	df = _get_stock_basic()
+	stockList = df.ts_code
 	l = len(stockList)
-	lstStocks=[]
-	print(time.ctime(),'-------- processing begin---------------')
+	lst = []
+	print(time.ctime(), '-------- processing begin---------------')
 	for i in range(l):
-#		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101' 
-#		and df.list_date[i] < startDate):
-		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
-		if(hangqing is not None):
-			idx = len(hangqing)
-			if (idx > 1):
-				x = 0
-				for j in range(idx-1):
-					volChange = ( hangqing.vol[j] / hangqing.vol[j + 1] )
-					if (volChange >= multiple and hangqing.open[j]>hangqing.close[j+1] and hangqing.change[j]>3
-					and hangqing.close[0] > hangqing.close[idx-1]):
-						x = 1
-						break
-				if (x == 1):
-					lstStocks.append(stockList[i])
-		# print(df.ts_code[i],j,hangqing.vol[j+1], hangqing.vol[j], round(volChange))
-		if ( i % 100 == 99):
+		if(not _should_skip(df, i, startDate)):
+			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			if hangqing is not None and len(hangqing) > 1:
+				idx = len(hangqing)
+				change = round((hangqing.close[0] - hangqing.close[idx-1]) / hangqing.close[idx-1] * 100, 2)
+				if change >= pct:
+					lst.append((df.ts_code[i], change))
+					print(df.ts_code[i], f'{change}%')
+		if(i % 100 == 99):
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
-		if ( i== l -1):
-			print (time.ctime(), " All records have been processed!!!")
-	return lstStocks
-
+		if(i == l - 1):
+			print(time.ctime(), " All records have been processed!!!")
+	print(time.ctime(), '-------- processing end-----------------')
+	lst.sort(key=lambda x: x[1], reverse=True)
+	return [item[0] for item in lst]
 
 
 #6个点代表强势，相对于T-1或T-2日放量2倍以上且涨超6个点，寻找这样的股票。西藏珠峰7.2日启动，中泰股份20210826晚关注到
@@ -486,3 +373,6 @@ def getlistgupiao(file):
 	for i in range(sht.max_row):
 		lista.append(sht.cell(i+1,1).value)
 	return lista
+
+
+

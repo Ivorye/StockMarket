@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跳空放量涨幅 - 合并策略</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 22px; margin-bottom: 4px; }
+        .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+        .controls input[type="text"] { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 130px; }
+        .controls button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        .btn-primary { background: #1677ff; color: #fff; }
+        .btn-primary:hover { background: #4096ff; }
+
+        .stats { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+        .stat-card { background: #fff; border-radius: 8px; padding: 16px 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); min-width: 130px; text-align: center; }
+        .stat-card .label { font-size: 13px; color: #888; }
+        .stat-card .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+        .stat-card .value.red { color: #ff4d4f; }
+        .stat-card .value.blue { color: #1677ff; }
+        .stat-card .value.orange { color: #fa8c16; }
+        .stat-card .value.green { color: #52c41a; }
+
+        .tabs { display: flex; gap: 0; margin-bottom: 0; }
+        .tab { padding: 10px 24px; font-size: 14px; cursor: pointer; border: 1px solid #d9d9d9; border-bottom: none; border-radius: 8px 8px 0 0; background: #fafafa; color: #666; transition: all 0.15s; }
+        .tab.active { background: #fff; color: #1677ff; font-weight: 600; border-color: #1677ff; position: relative; }
+        .tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #fff; }
+        .tab:hover:not(.active) { background: #f0f5ff; }
+
+        .panel { display: none; background: #fff; border: 1px solid #d9d9d9; border-top: none; border-radius: 0 0 8px 8px; overflow: hidden; }
+        .panel.active { display: block; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #fafafa; padding: 10px 14px; text-align: left; font-size: 13px; color: #666; border-bottom: 1px solid #f0f0f0; white-space: nowrap; position: sticky; top: 0; }
+        td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+        tr:hover { background: #f5f7fa; }
+        .code { font-family: "Cascadia Code", "Consolas", monospace; }
+        .code a { color: #1677ff; text-decoration: none; }
+        .code a:hover { text-decoration: underline; }
+        .cache-hint { font-size: 12px; color: #bbb; margin-left: 12px; }
+
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+        .tag-red { background: #fff1f0; color: #cf1322; }
+        .tag-orange { background: #fff7e6; color: #d46b08; }
+        .tag-green { background: #f6ffed; color: #389e0d; }
+        .tag-blue { background: #e6f4ff; color: #0958d9; }
+        .tag-gray { background: #f5f5f5; color: #8c8c8c; }
+
+        .badge { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+        .badge-gap { background: #1677ff; }
+        .badge-surge { background: #ff4d4f; }
+        .badge-gain { background: #fa8c16; }
+
+        .empty { text-align: center; padding: 60px; color: #bbb; font-size: 15px; }
+
+        .legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 13px; color: #888; align-items: center; }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+
+        .table-scroll { max-height: 600px; overflow-y: auto; }
+        .highlight-row { background: #fffbe6 !important; }
+        .section-title { font-size: 15px; font-weight: 600; margin: 16px 14px 8px; color: #333; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>跳空放量涨幅 - 三策略对比</h1>
+    <p class="subtitle">筛选日期: {{ data.today }} vs {{ data.prev_day }} | 最新交易日: {{ data.latest_date }}</p>
+
+    <div class="controls">
+        <form method="get" action="/combined" style="display:flex;gap:12px;align-items:center;">
+            <label style="font-size:14px;">日期:</label>
+            <input type="text" name="date" placeholder="20260814" value="{{ date }}" />
+            <button type="submit" class="btn-primary">查询</button>
+        </form>
+        <span style="font-size:13px;color:#999;">留空则使用最新交易日</span>
+        <span class="cache-hint">结果缓存30分钟，同一日期查询秒加载</span>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="label">合并策略(交集)</div>
+            <div class="value red">{{ data.combined | length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">放量涨幅</div>
+            <div class="value orange">{{ data.s1 | length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">跳空缺口</div>
+            <div class="value blue">{{ data.s2 | length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="label">重叠率</div>
+            <div class="value green">
+                {% if data.s1 | length > 0 %}
+                    {{ ((data.combined | length) / (data.s1 | length) * 100) | round(1) }}%
+                {% else %}-{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <span>条件标记:</span>
+        <span class="legend-item"><span class="badge badge-gap"></span>跳空缺口(今低>昨高)</span>
+        <span class="legend-item"><span class="badge badge-surge"></span>放量>=3倍</span>
+        <span class="legend-item"><span class="badge badge-gain"></span>涨幅>6%</span>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" onclick="switchTab('combined')">合并策略 ({{ data.combined | length }})</div>
+        <div class="tab" onclick="switchTab('gap')">跳空缺口 ({{ data.s2 | length }})</div>
+        <div class="tab" onclick="switchTab('surge')">放量涨幅 ({{ data.s1 | length }})</div>
+    </div>
+
+    <!-- 合并策略面板 -->
+    <div class="panel active" id="panel-combined">
+        {% if data.combined %}
+        <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>股票代码</th>
+                    <th>涨幅(%)</th>
+                    <th>量比</th>
+                    <th>缺口</th>
+                    <th>今开</th>
+                    <th>今高</th>
+                    <th>今低</th>
+                    <th>今收</th>
+                    <th>昨高</th>
+                    <th>昨收</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in data.combined %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td>
+                        {% if r.pct_chg >= 10 %}
+                            <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% elif r.pct_chg > 6 %}
+                            <span class="tag tag-orange">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% else %}
+                            {{ "%.2f" | format(r.pct_chg) }}%
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.vol_ratio >= 10 %}
+                            <span class="tag tag-red">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 5 %}
+                            <span class="tag tag-orange">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 3 %}
+                            <span class="tag tag-green">{{ r.vol_ratio }}x</span>
+                        {% else %}
+                            {{ r.vol_ratio }}x
+                        {% endif %}
+                    </td>
+                    <td><span class="tag tag-blue">{{ "%.2f" | format(r.gap_size) }}</span></td>
+                    <td>{{ "%.2f" | format(r.openp) }}</td>
+                    <td>{{ "%.2f" | format(r.high) }}</td>
+                    <td>{{ "%.2f" | format(r.low) }}</td>
+                    <td>{{ "%.2f" | format(r.closep) }}</td>
+                    <td>{{ "%.2f" | format(r.prev_high) }}</td>
+                    <td>{{ "%.2f" | format(r.prev_close) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty">当日无满足合并条件的股票（跳空缺口 + 放量>=3倍 + 涨幅>6%）</div>
+        {% endif %}
+    </div>
+
+    <!-- 跳空缺口面板 -->
+    <div class="panel" id="panel-gap">
+        {% if data.s2 %}
+        <div class="section-title">说明：仅满足跳空缺口条件，不要求放量和涨幅</div>
+        <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>股票代码</th>
+                    <th>涨幅(%)</th>
+                    <th>量比</th>
+                    <th>缺口</th>
+                    <th>今低</th>
+                    <th>昨高</th>
+                    <th>今收</th>
+                    <th>条件</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in data.s2 %}
+                <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
+                    <td>{{ loop.index }}</td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td>
+                        {% if r.pct_chg >= 10 %}
+                            <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% elif r.pct_chg > 6 %}
+                            <span class="tag tag-orange">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% else %}
+                            {{ "%.2f" | format(r.pct_chg) }}%
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.vol_ratio >= 10 %}
+                            <span class="tag tag-red">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 5 %}
+                            <span class="tag tag-orange">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 3 %}
+                            <span class="tag tag-green">{{ r.vol_ratio }}x</span>
+                        {% else %}
+                            {{ r.vol_ratio }}x
+                        {% endif %}
+                    </td>
+                    <td><span class="tag tag-blue">{{ "%.2f" | format(r.gap_size) }}</span></td>
+                    <td>{{ "%.2f" | format(r.low) }}</td>
+                    <td>{{ "%.2f" | format(r.prev_high) }}</td>
+                    <td>{{ "%.2f" | format(r.closep) }}</td>
+                    <td>
+                        <span class="badge badge-gap"></span>
+                        {% if r.is_surge %}<span class="badge badge-surge"></span>{% endif %}
+                        {% if r.big_gain %}<span class="badge badge-gain"></span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty">当日无跳空缺口股票</div>
+        {% endif %}
+    </div>
+
+    <!-- 放量涨幅面板 -->
+    <div class="panel" id="panel-surge">
+        {% if data.s1 %}
+        <div class="section-title">说明：仅满足放量>=3倍且涨幅>6%，不要求跳空缺口</div>
+        <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>股票代码</th>
+                    <th>涨幅(%)</th>
+                    <th>量比</th>
+                    <th>今收</th>
+                    <th>条件</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in data.s1 %}
+                <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
+                    <td>{{ loop.index }}</td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td>
+                        {% if r.pct_chg >= 10 %}
+                            <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% elif r.pct_chg > 6 %}
+                            <span class="tag tag-orange">{{ "%.2f" | format(r.pct_chg) }}%</span>
+                        {% else %}
+                            {{ "%.2f" | format(r.pct_chg) }}%
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.vol_ratio >= 10 %}
+                            <span class="tag tag-red">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 5 %}
+                            <span class="tag tag-orange">{{ r.vol_ratio }}x</span>
+                        {% elif r.vol_ratio >= 3 %}
+                            <span class="tag tag-green">{{ r.vol_ratio }}x</span>
+                        {% else %}
+                            {{ r.vol_ratio }}x
+                        {% endif %}
+                    </td>
+                    <td>{{ "%.2f" | format(r.closep) }}</td>
+                    <td>
+                        <span class="badge badge-surge"></span>
+                        <span class="badge badge-gain"></span>
+                        {% if r.has_gap %}<span class="badge badge-gap"></span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="empty">当日无放量涨幅股票</div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('panel-' + name).classList.add('active');
+}
+</script>
+</body>
+</html>
