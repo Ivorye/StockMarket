@@ -195,6 +195,7 @@ def getJDZF(df='',start_date='',end_date='',rate=''):
 
 
 #增量加载日线数据：查询每张表最新日期，只补缺失天数
+#带断层检测和失败重试
 def incrementalUpdateDailyData(df=None, lookback_days=30):
 	if(df is None or len(df)==0):
 		return
@@ -209,57 +210,87 @@ def incrementalUpdateDailyData(df=None, lookback_days=30):
 		sym=df.loc[k].symbol
 		ts_code=df.loc[k].ts_code
 		table=_escape_table_name("gp%s"%sym)
+		#获取该表已有的所有日期（用于检测断层）
 		try:
-			cursor.execute("SELECT MAX(trade_date) FROM %s"%table)
-			r=cursor.fetchone()
-			if r and r[0]:
-				latest=r[0]
-				if latest>=today_str:
-					skipped+=1
-					if k%200==199:
-						print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
-					continue
-				start=(datetime.datetime.strptime(latest,'%Y%m%d')+datetime.timedelta(days=1)).strftime('%Y%m%d')
-			else:
-				start=(datetime.date.today()-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
+			cursor.execute("SELECT trade_date FROM %s ORDER BY trade_date"%table)
+			existing=set(r[0] for r in cursor.fetchall())
 		except Exception:
+			existing=set()
+		if existing:
+			latest=max(existing)
+			#检测断层：统计日期范围内的工作日数 vs 实际行数
+			earliest=min(existing)
+			span_days=int((datetime.datetime.strptime(latest,'%Y%m%d')-datetime.datetime.strptime(earliest,'%Y%m%d')).days)
+			#工作日约为跨度天数的5/7，如果实际行数不到预期的80%，说明有断层
+			expected_trading_days=int(span_days*5/7)
+			if span_days>10 and len(existing)<expected_trading_days*0.8:
+				#有断层，按缺失天数回溯（至少lookback_days，最多覆盖全部缺失）
+				missing_days=expected_trading_days-len(existing)
+				lookback=max(lookback_days,missing_days*2+30)
+				start=(datetime.date.today()-datetime.timedelta(days=lookback)).strftime('%Y%m%d')
+				print(time.ctime(),'%s: 检测到%d天断层，回溯%d天加载'%(sym,missing_days,lookback))
+			elif latest>=today_str:
+				skipped+=1
+				if k%200==199:
+					print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
+				continue
+			else:
+				start=(datetime.datetime.strptime(latest,'%Y%m%d')+datetime.timedelta(days=1)).strftime('%Y%m%d')
+		else:
 			start=(datetime.date.today()-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
-		try:
-			data=pro.daily(ts_code=ts_code,start_date=start,end_date=today_str)
-		except Exception as e:
-			print("API异常 %s: %s"%(ts_code,e))
-			time.sleep(5)
-			continue
+		#调用API获取数据
+		data=None
+		for retry in range(3):
+			try:
+				data=pro.daily(ts_code=ts_code,start_date=start,end_date=today_str)
+				break
+			except Exception as e:
+				print("API异常(重试%d/3) %s: %s"%(retry+1,ts_code,e))
+				time.sleep(5)
 		if data is None or len(data)==0:
 			skipped+=1
 			if k%200==199:
 				print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
 			continue
-		ln=len(data)
-		for i in range(ln):
-			sql0="select trade_date from %s where trade_date=%%s"%table
-			sql="insert into %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) " \
-				"values(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)"%table
-			result=cursor.execute(sql0,(data.iloc[i].trade_date,))
-			if result==0:
-				try:
-					cursor.execute(sql,(
-						data.iloc[i].trade_date,
-						float(data.iloc[i].open),
-						float(data.iloc[i].high),
-						float(data.iloc[i].low),
-						float(data.iloc[i].close),
-						float(data.iloc[i].pre_close),
-						float(data.iloc[i].change),
-						float(data.iloc[i].pct_chg),
-						float(data.iloc[i].vol),
-						float(data.iloc[i].amount),
-					))
-				except Exception as e:
-					print("插入异常 %s %s: %s"%(sym,data.iloc[i].trade_date,e))
-					db.rollback()
+		#检测API返回的数据是否有大段断层（>10个交易日缺失）
+		dates=sorted(data.trade_date.tolist())
+		has_major_gap=False
+		for i in range(len(dates)-1):
+			d1=datetime.datetime.strptime(dates[i],'%Y%m%d')
+			d2=datetime.datetime.strptime(dates[i+1],'%Y%m%d')
+			if (d2-d1).days>15:
+				print("警告 %s: API数据有断层 %s->%s"%(ts_code,dates[i],dates[i+1]))
+				has_major_gap=True
+				break
+		#逐行插入（INSERT IGNORE跳过已有行，不影响其他行）
+		sql="INSERT IGNORE INTO %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) " \
+			"values(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)"%table
+		inserted=0
+		for i in range(len(data)):
+			td=data.iloc[i].trade_date
+			if td in existing:
+				continue
+			try:
+				cursor.execute(sql,(
+					td,
+					float(data.iloc[i].open),
+					float(data.iloc[i].high),
+					float(data.iloc[i].low),
+					float(data.iloc[i].close),
+					float(data.iloc[i].pre_close),
+					float(data.iloc[i].change),
+					float(data.iloc[i].pct_chg),
+					float(data.iloc[i].vol),
+					float(data.iloc[i].amount),
+				))
+				if cursor.rowcount>0:
+					inserted+=1
+			except Exception as e:
+				print("插入异常 %s %s: %s"%(sym,td,e))
 		db.commit()
 		updated+=1
+		if inserted>0 or has_major_gap:
+			print(time.ctime(),'%s: %d rows inserted, gap=%s'%(sym,inserted,has_major_gap))
 		if k%200==199:
 			print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
 		time.sleep(1.5)
