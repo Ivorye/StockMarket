@@ -64,13 +64,11 @@ def run_daily_update():
         return
 
     # 步骤5：汇总日线数据到st_daily表
-    today = datetime.date.today()
-    start_date = (today - datetime.timedelta(days=30)).strftime('%Y%m%d')
-    end_date = today.strftime('%Y%m%d')
+    # 步骤5：汇总日线数据到st_daily表（增量同步）
     logger.info("[5/6] 汇总日线数据到st_daily表...")
     try:
         sp.createDailyTable()
-        sp.buildDailyTable(start_date, end_date)
+        sp.buildDailyTable()
         logger.info("st_daily汇总完成")
     except Exception as e:
         logger.error(f"st_daily汇总失败: {e}")
