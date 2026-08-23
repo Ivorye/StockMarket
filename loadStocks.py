@@ -14,24 +14,45 @@ def _escape_table_name(name):
 	"""用反引号包裹表名，防止SQL关键字冲突"""
 	return "`%s`" % name.replace('`', '')
 
-#每天只能调用5次接口
+#每天只能调用5次接口，优先从数据库读取避免消耗配额
+#获取最新股票列表（调tushare API），同时缓存到stocks表
+#API失败时降级到stocks表缓存
 def getStockBasic():
-	pro = ts.pro_api(TUSHARE_TOKEN)
-	data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,fullname,area,industry,list_date')
-	df=pd.DataFrame(data)
-	return df
+	try:
+		pro = ts.pro_api(TUSHARE_TOKEN)
+		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,fullname,area,industry,list_date')
+		df=pd.DataFrame(data)
+		_store_to_stocks(df)
+		return df
+	except Exception as e:
+		print('tushare API失败(%s)，从stocks表读取缓存'%e)
+		return getStockBasicFromDB()
+
+def _store_to_stocks(df):
+	db=connectDB()
+	cursor=db.cursor()
+	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,fullname,list_date) VALUES(%s,%s,%s,%s,%s)"
+	for i in range(len(df)):
+		try:
+			cursor.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].fullname,df.iloc[i].list_date))
+		except Exception:
+			pass
+		if i%500==499:
+			db.commit()
+	db.commit()
+	db.close()
 
 #从数据库stocks表读取股票列表（避免重复调用stock_basic API）
 #返回与getStockBasic相同结构的DataFrame，若表为空返回None
 def getStockBasicFromDB():
 	db=connectDB()
 	cursor=db.cursor()
-	cursor.execute("SELECT symbol, st_code AS ts_code, fullname, list_date FROM stocks")
+	cursor.execute("SELECT symbol, st_code AS ts_code, fullname, fullname AS name, list_date FROM stocks")
 	rows = cursor.fetchall()
 	db.close()
 	if not rows:
 		return None
-	df = pd.DataFrame(rows, columns=['symbol','ts_code','fullname','list_date'])
+	df = pd.DataFrame(rows, columns=['symbol','ts_code','fullname','name','list_date'])
 	return df
 
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表

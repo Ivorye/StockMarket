@@ -7,14 +7,49 @@ import mysql.connector
 
 TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
 
-#延迟加载：首次调用时获取全量股票基本信息，之后缓存
+#延迟加载：优先从stocks表读取，回退到tushare API
 _basic_cache = None
 def _get_stock_basic():
 	global _basic_cache
-	if _basic_cache is None:
-		pro = ts.pro_api(TUSHARE_TOKEN)
-		_basic_cache = pro.query('stock_basic')
+	if _basic_cache is not None:
+		return _basic_cache
+	#先从数据库读取
+	try:
+		mdb=_connect_sm()
+		mycsr=mdb.cursor()
+		mycsr.execute("SELECT COUNT(*) FROM stocks")
+		cnt=mycsr.fetchone()[0]
+		if cnt>0:
+			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			rows=mycsr.fetchall()
+			df=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+			_basic_cache=df
+			mycsr.close();mdb.close()
+			return _basic_cache
+		mycsr.close();mdb.close()
+	except Exception:
+		pass
+	#回退到tushare API
+	pro = ts.pro_api(TUSHARE_TOKEN)
+	_basic_cache = pro.query('stock_basic')
+	#缓存到stocks表
+	_store_to_stocks(_basic_cache)
 	return _basic_cache
+
+def _store_to_stocks(df):
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,fullname,list_date) VALUES(%s,%s,%s,%s,%s)"
+	for i in range(len(df)):
+		try:
+			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].list_date))
+		except Exception:
+			pass
+		if i%500==499:
+			mdb.commit()
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
 
 def _connect_sm():
 	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare')
