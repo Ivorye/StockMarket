@@ -525,6 +525,15 @@ def buildDailyTable(startDate='', endDate=''):
 		if(k%500==499):
 			print(time.ctime(),round(k/500)*500,'tables processed,',count,'rows inserted')
 	mdb.commit()
+	#清理60个交易日以前的数据，防止st_daily无限膨胀（源数据在gp表中）
+	mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 1 OFFSET 59")
+	cutoff=mycsr.fetchone()
+	if cutoff:
+		mycsr.execute("DELETE FROM st_daily WHERE trade_date<%s",(cutoff[0],))
+		deleted=mycsr.rowcount
+		mdb.commit()
+		if deleted>0:
+			print(time.ctime(),'st_daily cleaned: %d old rows removed (before %s)'%(deleted,cutoff[0]))
 	mycsr.close()
 	mdb.close()
 	print(time.ctime(),'-------- buildDailyTable end: %d rows inserted---------------'%count)
