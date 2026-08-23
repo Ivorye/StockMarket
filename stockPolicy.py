@@ -51,6 +51,21 @@ def _store_to_stocks(df):
 	mycsr.close()
 	mdb.close()
 
+#从gp{symbol}表查询日线数据，返回与ts.pro_bar相同结构的DataFrame
+#columns: trade_date, open, high, low, close, pct_chg, vol
+def _get_daily_from_db(symbol, startDate, endDate):
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	table='`gp%s`'%symbol
+	sql="SELECT trade_date,openp,high,low,closep,pct_chg,vol FROM %s WHERE trade_date BETWEEN %%s AND %%s ORDER BY trade_date DESC"%table
+	mycsr.execute(sql,(startDate,endDate))
+	rows=mycsr.fetchall()
+	mycsr.close()
+	mdb.close()
+	if not rows:
+		return None
+	return DataFrame(rows,columns=['trade_date','open','high','low','close','pct_chg','vol'])
+
 def _connect_sm():
 	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare')
 
@@ -129,7 +144,7 @@ def gettiaokongshangzhangguo(startDate='',endDate=''):
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
 		if (not _should_skip(df, i, startDate)):
-			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			hangqing = _get_daily_from_db(df.symbol[i], startDate, endDate)
 			if hangqing is None:
 				continue
 			idx = len(hangqing)
@@ -170,7 +185,7 @@ def getJuliangshangzhang(stockList='',startDate='',endDate='',multiple=''):
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
 		if (not _should_skip(df, i, startDate)):
-			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			hangqing = _get_daily_from_db(df.symbol[i], startDate, endDate)
 			if hangqing is None:
 				continue
 			idx = len(hangqing)
@@ -212,7 +227,7 @@ def getxiangshangtiaokongquekou(stockList='',startDate='',endDate=''):
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
 		if (not _should_skip(df, i, startDate)):
-			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			hangqing = _get_daily_from_db(df.symbol[i], startDate, endDate)
 			if hangqing is None:
 				continue
 			idx = len(hangqing)
@@ -247,7 +262,7 @@ def getStockListByFluxRate(startDate='',endDate='',fluxRate='',filePath=''):
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
 		if (not _should_skip(df, i)):
-			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			hangqing = _get_daily_from_db(df.symbol[i], startDate, endDate)
 			if (hangqing is not None):
 				idx = len(hangqing)
 				if (idx > 1):
@@ -284,14 +299,14 @@ def getStockListByVolumeChange(stockList='',startDate='',endDate='',multiple='')
 	for i in range(l):
 #		if (df.symbol[i][0:3]!= '688' and df.name[i][0:2]!='ST' and df.name[i][0:2] !='*S' and df.list_date[i]<'20210101'
 #		and df.list_date[i] < startDate):
-		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
+		hangqing = _get_daily_from_db(stockList[i].split('.')[0], startDate, endDate)
 		if(hangqing is not None):
 			idx = len(hangqing)
 			if (idx > 1):
 				x = 0
 				for j in range(idx-1):
 					volChange = ( hangqing.vol[j] / hangqing.vol[j + 1] )
-					if (volChange >= multiple and hangqing.open[j]>hangqing.close[j+1] and hangqing.change[j]>3
+					if (volChange >= multiple and hangqing.open[j]>hangqing.close[j+1] and (hangqing.close[j]-hangqing.close[j+1])>3
 					and hangqing.close[0] > hangqing.close[idx-1]):
 						x = 1
 						break
@@ -317,7 +332,7 @@ def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 	lstStocks=[]
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
+		hangqing = _get_daily_from_db(stockList[i].split('.')[0], startDate, endDate)
 		if(hangqing is not None):
 			idx = len(hangqing)
 			if (idx >= 9):
@@ -353,7 +368,7 @@ def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 	lstMultiple = []
 	print(time.ctime(),'-------- processing begin---------------')
 	for i in range(l):
-		hangqing = ts.pro_bar(ts_code=stockList[i], adj='qfq', start_date=startDate, end_date=endDate)
+		hangqing = _get_daily_from_db(stockList[i].split('.')[0], startDate, endDate)
 		if(hangqing is not None):
 			idx = len(hangqing)
 			if (idx > 1):
@@ -381,7 +396,7 @@ def getZhangFu(startDate='', endDate='', pct=30):
 	print(time.ctime(), '-------- processing begin---------------')
 	for i in range(l):
 		if(not _should_skip(df, i, startDate)):
-			hangqing = ts.pro_bar(ts_code=df.ts_code[i], adj='qfq', start_date=startDate, end_date=endDate)
+			hangqing = _get_daily_from_db(df.symbol[i], startDate, endDate)
 			if hangqing is not None and len(hangqing) > 1:
 				idx = len(hangqing)
 				change = round((hangqing.close[0] - hangqing.close[idx-1]) / hangqing.close[idx-1] * 100, 2)
