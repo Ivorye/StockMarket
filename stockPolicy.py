@@ -2,6 +2,7 @@ import tushare as ts
 import openpyxl
 from pandas import DataFrame
 import time
+import datetime
 import mysql.connector
 
 TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
@@ -375,4 +376,197 @@ def getlistgupiao(file):
 	return lista
 
 
+#========== 放量涨幅筛选（st_daily_signal）==========
+
+#创建 st_daily 表（汇总所有个股日线数据）
+def createDailyTable():
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	sql="CREATE TABLE IF NOT EXISTS st_daily (" \
+		"ts_code VARCHAR(12) NOT NULL," \
+		"symbol VARCHAR(6) NOT NULL," \
+		"trade_date VARCHAR(8) NOT NULL," \
+		"openp FLOAT," \
+		"high FLOAT," \
+		"low FLOAT," \
+		"closep FLOAT," \
+		"pct_chg FLOAT," \
+		"vol FLOAT," \
+		"amount FLOAT," \
+		"PRIMARY KEY (ts_code, trade_date)," \
+		"INDEX idx_trade_date (trade_date)," \
+		"INDEX idx_symbol (symbol)" \
+		")"
+	mycsr.execute(sql)
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+	print('st_daily table created')
+
+#将所有 gp{symbol} 表的日线数据汇总到 st_daily 表
+def buildDailyTable(startDate='', endDate=''):
+	if(startDate is None or startDate == ''):
+		startDate=(datetime.date.today()-datetime.timedelta(days=7)).strftime('%Y%m%d')
+	if(endDate is None or endDate == ''):
+		endDate=datetime.date.today().strftime('%Y%m%d')
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	#获取 symbol → ts_code 映射
+	sym2ts={}
+	try:
+		mycsr.execute("SELECT symbol, st_code FROM stocks")
+		for row in mycsr.fetchall():
+			sym2ts[row[0]]=row[1]
+	except Exception:
+		pass
+	if not sym2ts:
+		print('stocks表为空，从tushare API获取映射...')
+		try:
+			pro=ts.pro_api(TUSHARE_TOKEN)
+			basic=pro.query('stock_basic',exchange='',list_status='L',fields='ts_code,symbol')
+			for _,r in basic.iterrows():
+				sym2ts[r['symbol']]=r['ts_code']
+		except Exception as e:
+			print('tushare API调用失败(%s)，使用规则映射...'%e)
+	if not sym2ts:
+		mycsr.execute("SHOW TABLES LIKE 'gp%%'")
+		for (t,) in mycsr.fetchall():
+			sym=t[2:]
+			if(sym.startswith('6')):
+				sym2ts[sym]=sym+'.SH'
+			else:
+				sym2ts[sym]=sym+'.SZ'
+		print('已通过规则生成 %d 条 symbol→ts_code 映射'%len(sym2ts))
+	mycsr.execute("SHOW TABLES LIKE 'gp%%'")
+	tables=[t[0] for t in mycsr.fetchall()]
+	total=len(tables)
+	#预先计算日期范围内的已有记录，避免逐条查询
+	sql_check="SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date BETWEEN %s AND %s"
+	sql_insert="INSERT IGNORE INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,pct_chg,vol,amount) " \
+		"VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+	print(time.ctime(),'-------- buildDailyTable begin (%d tables, %s~%s)---------------'%(total,startDate,endDate))
+	count=0
+	for k,table in enumerate(tables):
+		sym=table[2:]
+		ts_code=sym2ts.get(sym)
+		if not ts_code:
+			continue
+		try:
+			mycsr.execute("SELECT trade_date,openp,high,low,closep,pct_chg,vol,amount FROM `%s` WHERE trade_date BETWEEN %%s AND %%s"%(table),(startDate,endDate))
+			rows=mycsr.fetchall()
+			if not rows:
+				continue
+			#批量检查已有日期
+			mycsr.execute(sql_check,(ts_code,startDate,endDate))
+			existing=set(r[0] for r in mycsr.fetchall())
+			vals=[]
+			for row in rows:
+				td=str(row[0])
+				if td in existing:
+					continue
+				vals.append((ts_code,sym,td,row[1],row[2],row[3],row[4],row[5],row[6],row[7]))
+			if vals:
+				mycsr.executemany(sql_insert,vals)
+				count+=len(vals)
+				if(count%500==0):
+					mdb.commit()
+		except Exception as e:
+			pass
+		if(k%500==499):
+			print(time.ctime(),round(k/500)*500,'tables processed,',count,'rows inserted')
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+	print(time.ctime(),'-------- buildDailyTable end: %d rows inserted---------------'%count)
+
+#创建 st_daily_signal 表（放量涨幅信号表）
+def createSignalTable():
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	sql="CREATE TABLE IF NOT EXISTS st_daily_signal (" \
+		"id INT AUTO_INCREMENT PRIMARY KEY," \
+		"trade_date VARCHAR(8) NOT NULL," \
+		"st_code VARCHAR(12) NOT NULL," \
+		"closePrice FLOAT," \
+		"pct_chg FLOAT," \
+		"vol FLOAT," \
+		"prev_vol FLOAT," \
+		"vol_ratio FLOAT," \
+		"created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
+		"UNIQUE KEY uk_date_code (trade_date, st_code)" \
+		")"
+	mycsr.execute(sql)
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+	print('st_daily_signal table created')
+
+#筛选放量涨幅股票：当日成交量>=前日3倍且涨幅>6%，排除科创板/ST/次新股
+#结果写入 st_daily_signal 表（去重插入）
+def getLiangJiaFangLiang(startDate='', endDate=''):
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	#获取st_daily中最近两个交易日
+	if(endDate is None or endDate == ''):
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 2")
+		dates=mycsr.fetchall()
+		if(len(dates)<2):
+			print('st_daily数据不足两个交易日，请先运行buildDailyTable()')
+			mycsr.close();mdb.close()
+			return []
+		today=dates[0][0]
+		prev_day=dates[1][0]
+	else:
+		today=endDate
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<%s ORDER BY trade_date DESC LIMIT 1",(today,))
+		r=mycsr.fetchone()
+		if not r:
+			print('找不到前一交易日')
+			mycsr.close();mdb.close()
+			return []
+		prev_day=r[0]
+	#SQL联查：当日成交量>=前日3倍且涨幅>6%
+	sql="SELECT a.ts_code,a.trade_date,a.closep,a.pct_chg,a.vol,b.vol AS prev_vol," \
+		"ROUND(a.vol/b.vol,2) AS vol_ratio " \
+		"FROM st_daily a JOIN st_daily b ON a.ts_code=b.ts_code " \
+		"WHERE a.trade_date=%s AND b.trade_date=%s " \
+		"AND a.vol>=b.vol*3 AND a.pct_chg>6"
+	mycsr.execute(sql,(today,prev_day))
+	rows=mycsr.fetchall()
+	#加载stock_basic用于_should_skip过滤
+	df=None
+	ts_to_idx={}
+	try:
+		df=_get_stock_basic()
+		ts_to_idx={df.ts_code[i]:i for i in range(len(df))}
+	except Exception:
+		pass
+	result=[]
+	for row in rows:
+		ts_code=row[0]
+		sym=ts_code.split('.')[0]
+		#排除科创板(688)
+		if(sym.startswith('688')):
+			continue
+		#如果有stock_basic数据，应用完整_should_skip过滤
+		if df is not None:
+			idx=ts_to_idx.get(ts_code)
+			if idx is not None and _should_skip(df,idx):
+				continue
+		result.append({
+			'st_code':row[0],'trade_date':row[1],'closePrice':row[2],
+			'pct_chg':row[3],'vol':row[4],'prev_vol':row[5],'vol_ratio':row[6]
+		})
+	#写入st_daily_signal（去重插入）
+	sql_insert="INSERT IGNORE INTO st_daily_signal(trade_date,st_code,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
+		"VALUES(%s,%s,%s,%s,%s,%s,%s)"
+	inserted=0
+	for r in result:
+		mycsr.execute(sql_insert,(r['trade_date'],r['st_code'],r['closePrice'],r['pct_chg'],r['vol'],r['prev_vol'],r['vol_ratio']))
+		inserted+=mycsr.rowcount
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+	print(time.ctime(),'getLiangJiaFangLiang: %s vs %s, 筛选出%d只, 写入%d条新记录'%(today,prev_day,len(result),inserted))
+	return result
 

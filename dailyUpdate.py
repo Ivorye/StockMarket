@@ -4,6 +4,7 @@ import os
 import sys
 
 import loadStocks as ld
+import stockPolicy as sp
 
 # 创建logs目录
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
@@ -64,6 +65,25 @@ def run_daily_update():
     except Exception as e:
         logger.error(f"日线数据加载失败: {e}")
         return
+
+    # 步骤5：汇总日线数据到st_daily表
+    logger.info("[5/5] 汇总日线数据到st_daily表...")
+    try:
+        sp.createDailyTable()
+        sp.buildDailyTable(start_date, end_date)
+        logger.info("st_daily汇总完成")
+    except Exception as e:
+        logger.error(f"st_daily汇总失败: {e}")
+        return
+
+    # 步骤6：执行放量涨幅筛选
+    logger.info("[6/6] 执行放量涨幅筛选...")
+    try:
+        sp.createSignalTable()
+        result = sp.getLiangJiaFangLiang()
+        logger.info(f"放量涨幅筛选完成，命中 {len(result)} 只股票")
+    except Exception as e:
+        logger.error(f"放量涨幅筛选失败: {e}")
 
     logger.info("========== 每日数据更新完成 ==========")
 
