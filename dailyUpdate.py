@@ -28,7 +28,7 @@ def run_daily_update():
     logger.info("========== 每日数据更新开始 ==========")
 
     # 步骤1：获取股票列表（优先从数据库读取，避免消耗stock_basic API配额）
-    logger.info("[1/4] 获取股票列表...")
+    logger.info("[1/6] 获取股票列表...")
     try:
         df = ld.getStockBasic()
         logger.info(f"从API获取到 {len(df)} 只股票基本信息")
@@ -37,7 +37,7 @@ def run_daily_update():
         return
 
     # 步骤2：将所有股票基本信息载入总表
-    logger.info("[2/4] 载入股票基本信息到总表 (loadAllBasic)...")
+    logger.info("[2/6] 载入股票基本信息到总表 (loadAllBasic)...")
     try:
         ld.loadAllBasic(df)
         logger.info("股票基本信息载入完成")
@@ -46,7 +46,7 @@ def run_daily_update():
         return
 
     # 步骤3：为新股票建表
-    logger.info("[3/4] 为新股票创建日线表 (createStockTable)...")
+    logger.info("[3/6] 为新股票创建日线表 (createStockTable)...")
     try:
         ld.createStockTable(df)
         logger.info("新股票建表完成")
@@ -54,11 +54,11 @@ def run_daily_update():
         logger.error(f"createStockTable 执行失败: {e}")
         return
 
-    # 步骤4：加载近7天日线数据（增量，已存在的记录会跳过）
+    # 步骤4：加载近30天日线数据（增量，已存在的记录会跳过）
     today = datetime.date.today()
-    start_date = (today - datetime.timedelta(days=7)).strftime('%Y%m%d')
+    start_date = (today - datetime.timedelta(days=30)).strftime('%Y%m%d')
     end_date = today.strftime('%Y%m%d')
-    logger.info(f"[4/4] 加载日线数据 ({start_date} ~ {end_date})...")
+    logger.info(f"[4/6] 加载日线数据 ({start_date} ~ {end_date})...")
     try:
         ld.insertNewTransactonRecordForAllStocks(df, start_date=start_date, end_date=end_date)
         logger.info("日线数据加载完成")
@@ -67,7 +67,7 @@ def run_daily_update():
         return
 
     # 步骤5：汇总日线数据到st_daily表
-    logger.info("[5/5] 汇总日线数据到st_daily表...")
+    logger.info("[5/6] 汇总日线数据到st_daily表...")
     try:
         sp.createDailyTable()
         sp.buildDailyTable(start_date, end_date)
