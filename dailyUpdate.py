@@ -54,19 +54,19 @@ def run_daily_update():
         logger.error(f"createStockTable 执行失败: {e}")
         return
 
-    # 步骤4：加载近30天日线数据（增量，已存在的记录会跳过）
-    today = datetime.date.today()
-    start_date = (today - datetime.timedelta(days=30)).strftime('%Y%m%d')
-    end_date = today.strftime('%Y%m%d')
-    logger.info(f"[4/6] 加载日线数据 ({start_date} ~ {end_date})...")
+    # 步骤4：增量加载日线数据（只补缺失天数，已存在的记录会跳过）
+    logger.info("[4/6] 增量加载日线数据...")
     try:
-        ld.insertNewTransactonRecordForAllStocks(df, start_date=start_date, end_date=end_date)
+        ld.incrementalUpdateDailyData(df, lookback_days=30)
         logger.info("日线数据加载完成")
     except Exception as e:
         logger.error(f"日线数据加载失败: {e}")
         return
 
     # 步骤5：汇总日线数据到st_daily表
+    today = datetime.date.today()
+    start_date = (today - datetime.timedelta(days=30)).strftime('%Y%m%d')
+    end_date = today.strftime('%Y%m%d')
     logger.info("[5/6] 汇总日线数据到st_daily表...")
     try:
         sp.createDailyTable()

@@ -1,4 +1,4 @@
-import pymysql, pandas as pd, tushare as ts, time
+import pymysql, pandas as pd, tushare as ts, time, datetime
 
 TUSHARE_TOKEN = "4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9"
 
@@ -14,7 +14,6 @@ def _escape_table_name(name):
 	"""用反引号包裹表名，防止SQL关键字冲突"""
 	return "`%s`" % name.replace('`', '')
 
-#每天只能调用5次接口，优先从数据库读取避免消耗配额
 #获取最新股票列表（调tushare API），同时缓存到stocks表
 #API失败时降级到stocks表缓存
 def getStockBasic():
@@ -193,3 +192,76 @@ def getJDZF(df='',start_date='',end_date='',rate=''):
 			print("查询涨幅异常 %s: %s" % (symbol, e))
 	db.close()
 	return lst
+
+
+#增量加载日线数据：查询每张表最新日期，只补缺失天数
+def incrementalUpdateDailyData(df=None, lookback_days=30):
+	if(df is None or len(df)==0):
+		return
+	today_str=datetime.date.today().strftime('%Y%m%d')
+	db=connectDB()
+	cursor=db.cursor()
+	pro=ts.pro_api(TUSHARE_TOKEN)
+	total=len(df)
+	updated=0
+	skipped=0
+	for k in range(total):
+		sym=df.loc[k].symbol
+		ts_code=df.loc[k].ts_code
+		table=_escape_table_name("gp%s"%sym)
+		try:
+			cursor.execute("SELECT MAX(trade_date) FROM %s"%table)
+			r=cursor.fetchone()
+			if r and r[0]:
+				latest=r[0]
+				if latest>=today_str:
+					skipped+=1
+					if k%200==199:
+						print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
+					continue
+				start=(datetime.datetime.strptime(latest,'%Y%m%d')+datetime.timedelta(days=1)).strftime('%Y%m%d')
+			else:
+				start=(datetime.date.today()-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
+		except Exception:
+			start=(datetime.date.today()-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
+		try:
+			data=pro.daily(ts_code=ts_code,start_date=start,end_date=today_str)
+		except Exception as e:
+			print("API异常 %s: %s"%(ts_code,e))
+			time.sleep(5)
+			continue
+		if data is None or len(data)==0:
+			skipped+=1
+			if k%200==199:
+				print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
+			continue
+		ln=len(data)
+		for i in range(ln):
+			sql0="select trade_date from %s where trade_date=%%s"%table
+			sql="insert into %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) " \
+				"values(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)"%table
+			result=cursor.execute(sql0,(data.iloc[i].trade_date,))
+			if result==0:
+				try:
+					cursor.execute(sql,(
+						data.iloc[i].trade_date,
+						float(data.iloc[i].open),
+						float(data.iloc[i].high),
+						float(data.iloc[i].low),
+						float(data.iloc[i].close),
+						float(data.iloc[i].pre_close),
+						float(data.iloc[i].change),
+						float(data.iloc[i].pct_chg),
+						float(data.iloc[i].vol),
+						float(data.iloc[i].amount),
+					))
+				except Exception as e:
+					print("插入异常 %s %s: %s"%(sym,data.iloc[i].trade_date,e))
+					db.rollback()
+		db.commit()
+		updated+=1
+		if k%200==199:
+			print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
+		time.sleep(1.5)
+	db.close()
+	print(time.ctime(),'incrementalUpdate done: %d updated, %d up-to-date, %d total'%(updated,skipped,total))
