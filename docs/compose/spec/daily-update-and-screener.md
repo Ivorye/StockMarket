@@ -1,33 +1,39 @@
 ---
 feature: daily-update-and-screener
 status: delivered
-updated: 2026-08-23
+updated: 2026-08-24
 branch: feature/daily-update-screener
 commits: 
 ---
 
-# 每日数据更新 + 放量涨幅筛选
+# 每日数据更新 + 策略信号筛选
 
 ## Report
 
-**What was built** — 两个功能模块 + 额外的 Web 筛选系统：
+**What was built** — 两个功能模块 + Web 筛选系统 + 全策略信号持久化：
 
 1. `dailyUpdate.py`：每日自动执行 `getStockBasic → loadAllBasic → createStockTable → insertNewTransactonRecordForAllStocks → buildDailyTable → getLiangJiaFangLiang` 流程（6步），带日志输出到 `logs/daily_update.log`。配合 `setup_task.bat` 一键注册 Windows 定时任务（每日 20:00）。
 
-2. `stockPolicy.py` 新增三个函数：
+2. `stockPolicy.py` 核心函数：
    - `createDailyTable()` — 创建 `st_daily` 汇总表
    - `buildDailyTable(startDate, endDate)` — 将所有 `gp{symbol}` 表的日线数据汇总到 `st_daily`，支持 symbol→ts_code 映射（优先 stocks 表，回退 tushare API，最终规则映射）
-   - `createSignalTable()` — 创建 `st_daily_signal` 表（按 spec 定义的结构）
-   - `getLiangJiaFangLiang(startDate, endDate)` — 基于 `st_daily` 表 SQL 联查，筛选当日成交量≥前日3倍且涨幅>6%的股票，排除科创板/ST/次新股，结果去重写入 `st_daily_signal` 表
+   - `createSignalTable()` — 创建 `st_daily_signal` 表（带 `strategy` 列，自动兼容旧表迁移）
+   - `_write_signal(st_codes, strategy, trade_date)` — 通用信号写入函数，查 `st_daily` 补全行情数据，写入 DB + CSV
+   - `_append_csv(trade_date, rows)` — 追加写入 `output/signals_{trade_date}.csv`
+   - `getLiangJiaFangLiang(startDate, endDate)` — 基于 `st_daily` 表 SQL 联查，筛选当日成交量≥前日3倍且涨幅>6%的股票
+   - 其他策略函数（见 S2.5）执行后自动调用 `_write_signal` 持久化结果
 
-3. `StockApplication.py` 追加了筛选函数调用示例（T6）
+3. `main.py`：FastAPI Web 服务（见 S4.1），启动时自动建表，页面访问时将 s1/s2/combined 三个策略结果写入 DB + CSV
 
-4. 额外实现（不在原 spec 中）：
-   - `main.py`：FastAPI Web 服务，提供跳空放量涨幅策略的可视化页面
+4. `StockApplication.py` 追加了筛选函数调用示例（T6）
+
+5. `runAllStrategies.py`：命令行一键运行所有策略
+
+6. 额外实现（不在原 spec 中）：
    - `run_strategy_combined.py`：独立命令行筛选脚本
    - `compare_strategies.py`：双策略对比分析工具
 
-**Files touched**: `stockPolicy.py`（新增 createDailyTable/buildDailyTable/createSignalTable/getLiangJiaFangLiang）、`dailyUpdate.py`（追加步骤5/6）、`StockApplication.py`（追加调用示例）、`main.py`（新建）、`templates/combined.html`（新建）、`run_strategy_combined.py`（新建）、`compare_strategies.py`（新建）、`docs/compose/spec/daily-update-and-screener.md`（更新）
+**Files touched**: `stockPolicy.py`（新增 createDailyTable/buildDailyTable/createSignalTable/_write_signal/_append_csv/getLiangJiaFangLiang + 8个策略函数追加信号写入）、`main.py`（新增 _save_signals/startup 事件）、`dailyUpdate.py`（追加步骤5/6）、`StockApplication.py`（追加调用示例）、`templates/combined.html`（新建）、`run_strategy_combined.py`（新建）、`compare_strategies.py`（新建）、`runAllStrategies.py`（新建）
 
 ## [S1] Problem
 用户需要两个自动化能力：
@@ -54,7 +60,7 @@ commits:
 - 基于 `st_daily` 表进行 SQL 联查（两个交易日对比）
 - 筛选逻辑：当日成交量 ≥ 前日成交量 × 3，且当日涨幅（pct_chg）> 6%
 - 排除科创板(688)；若 tushare stock_basic 可用，额外排除 ST/*ST 和次新股（`_should_skip`）
-- 结果去重写入 `st_daily_signal` 表（INSERT IGNORE，依赖 trade_date + st_code 唯一键）
+- 结果去重写入 `st_daily_signal` 表（INSERT IGNORE，依赖 trade_date + st_code + strategy 唯一键）
 
 辅助函数：
 - `createDailyTable()` — 创建 `st_daily` 汇总表（ts_code, symbol, trade_date, OHLC, pct_chg, vol, amount）
@@ -80,15 +86,18 @@ CREATE TABLE IF NOT EXISTS st_daily_signal (
   id INT AUTO_INCREMENT PRIMARY KEY,
   trade_date VARCHAR(8) NOT NULL,
   st_code VARCHAR(12) NOT NULL,
+  strategy VARCHAR(50) NOT NULL DEFAULT 'default',
   closePrice FLOAT,
   pct_chg FLOAT,
   vol FLOAT,
   prev_vol FLOAT,
   vol_ratio FLOAT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uk_date_code (trade_date, st_code)
+  UNIQUE KEY uk_date_code_strategy (trade_date, st_code, strategy)
 );
 ```
+
+`createSignalTable()` 同时包含旧表迁移逻辑：自动添加 `strategy` 列、替换旧唯一键 `uk_date_code` 为新唯一键 `uk_date_code_strategy`。
 
 ### S2.4 调用入口
 
@@ -101,6 +110,38 @@ sp.buildDailyTable(startDate='20260730', endDate='20260822')
 result = sp.getLiangJiaFangLiang()
 ```
 
+### S2.5 全策略信号持久化
+
+所有策略函数执行后自动将命中结果写入 `st_daily_signal` 表，同时生成 CSV 文件。
+
+**写入机制**：
+- `stockPolicy.py` 中各策略函数在 return 前调用 `_write_signal(st_codes, strategy, trade_date)`
+- `_write_signal` 通过 `st_daily` 表查补完整的行情数据（closePrice, pct_chg, vol, prev_vol, vol_ratio），再 INSERT IGNORE 写入
+- `main.py` 中 `_save_signals(rows, strategy, trade_date)` 直接使用已有的内存数据写入
+
+**CSV 输出**：
+- 文件路径：`output/signals_{trade_date}.csv`（按交易日分文件，所有策略共用）
+- 编码：UTF-8 with BOM（Excel 直接打开不乱码）
+- 首次写入自动创建表头，后续追加
+
+**已接入策略清单**：
+
+| 策略名称 | 来源 | 写入函数 |
+|---|---|---|
+| 量价放量 | stockPolicy.getLiangJiaFangLiang | 直接 INSERT |
+| 跳空上涨过 | stockPolicy.gettiaokongshangzhangguo | _write_signal |
+| 巨量上涨 | stockPolicy.getJuliangshangzhang | _write_signal |
+| 向上跳空缺口 | stockPolicy.getxiangshangtiaokongquekou | _write_signal |
+| 放量变化 | stockPolicy.getStockListByVolumeChange | _write_signal |
+| 量增 | stockPolicy.getLiangzeng | _write_signal |
+| 放量日 | stockPolicy.getFangliangDay0 | _write_signal |
+| 区间涨幅{pct}% | stockPolicy.getZhangFu | _write_signal |
+| 放量涨幅 | main.py (s1) | _save_signals |
+| 跳空缺口 | main.py (s2) | _save_signals |
+| 跳空放量涨幅 | main.py (combined) | _save_signals |
+
+去重机制：`INSERT IGNORE` + `UNIQUE KEY (trade_date, st_code, strategy)`，同一股票同一天同策略不会重复插入。数据无过期清理机制，永久累积。
+
 ## [S3] Out of Scope（原设计）
 - 不修改现有 `loadStocks.py` 或 `stockPolicy.py` 中的任何已有函数。
 - 不实现 Web 界面或邮件通知。
@@ -111,7 +152,9 @@ result = sp.getLiangJiaFangLiang()
 
 ### S4.1 FastAPI Web 筛选系统 (`main.py`)
 - 基于 FastAPI + Jinja2 的 Web 服务，提供跳空放量涨幅策略的可视化页面
+- 启动时自动调用 `createSignalTable()` 建表/迁移（`@app.on_event("startup")`）
 - `_run_combined_strategy(date_str)` 实现三策略并行筛选：s1（放量涨幅）、s2（跳空缺口）、combined（三条件同时满足）
+- 每次筛选完成后调用 `_save_signals()` 将三个策略结果写入 `st_daily_signal` 表 + CSV 文件
 - 内存缓存机制（`_cache`），TTL 30 分钟
 - 支持通过 `?date=` 参数查看历史日期的筛选结果
 - 东方财富股票链接生成（`_eastmoney_url`）
