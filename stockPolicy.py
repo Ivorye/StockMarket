@@ -3,6 +3,8 @@ import openpyxl
 from pandas import DataFrame
 import time
 import datetime
+import os
+import csv
 import mysql.connector
 
 TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
@@ -166,6 +168,8 @@ def gettiaokongshangzhangguo(startDate='',endDate=''):
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
 	print(time.ctime(),'-------- processing end-----------------')
+	if lstMultiple:
+		_write_signal(lstMultiple, '跳空上涨过', endDate)
 	return lstMultiple
 
 #选出曾经有过巨量上涨记录，第二三天量跌调整，但是振幅在2%以内的股票，------->很有效，选中股票莱美药业买入直赚10个点
@@ -210,6 +214,8 @@ def getJuliangshangzhang(stockList='',startDate='',endDate='',multiple=''):
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
 	print(time.ctime(),'-------- processing end-----------------')
+	if lstMultiple:
+		_write_signal(lstMultiple, '巨量上涨', endDate)
 	return lstMultiple
 
 #获取向上跳空的股票，剔除科创版、ST和次新股
@@ -245,6 +251,8 @@ def getxiangshangtiaokongquekou(stockList='',startDate='',endDate=''):
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
 	print(time.ctime(),'-------- processing end-----------------')
+	if lstMultiple:
+		_write_signal(lstMultiple, '向上跳空缺口', endDate)
 	return lstMultiple
 
 def getStockListByFluxRate(startDate='',endDate='',fluxRate='',filePath=''):
@@ -317,6 +325,8 @@ def getStockListByVolumeChange(stockList='',startDate='',endDate='',multiple='')
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
+	if lstStocks:
+		_write_signal(lstStocks, '放量变化', endDate)
 	return lstStocks
 
 def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
@@ -350,6 +360,8 @@ def getLiangzeng(stockList='',startDate='',endDate='',multiple=''):
 			print(time.ctime(), round(i/100)*100, ' records have been processed....')
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
+	if lstStocks:
+		_write_signal(lstStocks, '量增', endDate)
 	return lstStocks
 
 #获取放量股票，当日放量倍数由multiple确定
@@ -379,6 +391,8 @@ def getFangliangDay0(stockList='',startDate='',endDate='',multiple=''):
 		if ( i== l -1):
 			print (time.ctime(), " All records have been processed!!!")
 	print(time.ctime(),'-------- processing end-----------------')
+	if lstMultiple:
+		_write_signal(lstMultiple, '放量日', endDate)
 	return lstMultiple
 
 
@@ -409,7 +423,10 @@ def getZhangFu(startDate='', endDate='', pct=30):
 			print(time.ctime(), " All records have been processed!!!")
 	print(time.ctime(), '-------- processing end-----------------')
 	lst.sort(key=lambda x: x[1], reverse=True)
-	return [item[0] for item in lst]
+	codes = [item[0] for item in lst]
+	if codes:
+		_write_signal(codes, f'区间涨幅{pct}%', endDate)
+	return codes
 
 
 #6个点代表强势，相对于T-1或T-2日放量2倍以上且涨超6个点，寻找这样的股票。西藏珠峰7.2日启动，中泰股份20210826晚关注到
@@ -550,7 +567,7 @@ def buildDailyTable(startDate='', endDate=''):
 	mdb.close()
 	print(time.ctime(),'-------- buildDailyTable end: %d rows inserted---------------'%count)
 
-#创建 st_daily_signal 表（放量涨幅信号表）
+#创建 st_daily_signal 表（策略信号表）
 def createSignalTable():
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
@@ -558,19 +575,84 @@ def createSignalTable():
 		"id INT AUTO_INCREMENT PRIMARY KEY," \
 		"trade_date VARCHAR(8) NOT NULL," \
 		"st_code VARCHAR(12) NOT NULL," \
+		"strategy VARCHAR(50) NOT NULL DEFAULT 'default'," \
 		"closePrice FLOAT," \
 		"pct_chg FLOAT," \
 		"vol FLOAT," \
 		"prev_vol FLOAT," \
 		"vol_ratio FLOAT," \
 		"created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," \
-		"UNIQUE KEY uk_date_code (trade_date, st_code)" \
+		"UNIQUE KEY uk_date_code_strategy (trade_date, st_code, strategy)" \
 		")"
 	mycsr.execute(sql)
-	mdb.commit()
+	# 兼容旧表：添加 strategy 列并更新唯一键
+	try:
+		mycsr.execute("ALTER TABLE st_daily_signal ADD COLUMN strategy VARCHAR(50) NOT NULL DEFAULT 'default' AFTER st_code")
+		mdb.commit()
+	except Exception:
+		pass
+	try:
+		mycsr.execute("ALTER TABLE st_daily_signal DROP INDEX uk_date_code")
+		mdb.commit()
+	except Exception:
+		pass
+	try:
+		mycsr.execute("ALTER TABLE st_daily_signal ADD UNIQUE KEY uk_date_code_strategy (trade_date, st_code, strategy)")
+		mdb.commit()
+	except Exception:
+		pass
 	mycsr.close()
 	mdb.close()
 	print('st_daily_signal table created')
+
+#追加数据到CSV文件，按交易日分文件，存放在output目录
+def _append_csv(trade_date, rows):
+	output_dir=os.path.join(os.path.dirname(os.path.abspath(__file__)),'output')
+	os.makedirs(output_dir,exist_ok=True)
+	filepath=os.path.join(output_dir,f'signals_{trade_date}.csv')
+	write_header=not os.path.exists(filepath)
+	with open(filepath,'a',newline='',encoding='utf-8-sig') as f:
+		w=csv.writer(f)
+		if write_header:
+			w.writerow(['trade_date','st_code','strategy','closePrice','pct_chg','vol','prev_vol','vol_ratio'])
+		w.writerows(rows)
+
+#将股票列表的信号写入 st_daily_signal 表
+#strategy: 策略名称，st_codes: ts_code列表，trade_date: 交易日
+def _write_signal(st_codes, strategy, trade_date=''):
+	mdb=_connect_sm()
+	mycsr=mdb.cursor()
+	if not trade_date:
+		mycsr.execute("SELECT MAX(trade_date) FROM st_daily")
+		r=mycsr.fetchone()
+		trade_date=r[0] if r else ''
+	if not trade_date:
+		mycsr.close();mdb.close()
+		return
+	sql_insert="INSERT IGNORE INTO st_daily_signal(trade_date,st_code,strategy,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
+		"SELECT a.ts_code, %s, %s, a.closep, a.pct_chg, a.vol, b.vol, ROUND(a.vol/b.vol,2) " \
+		"FROM st_daily a LEFT JOIN st_daily b ON a.ts_code=b.ts_code " \
+		"WHERE a.ts_code=%s AND a.trade_date=%s AND b.trade_date=(" \
+		"SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<%s ORDER BY trade_date DESC LIMIT 1)"
+	# 查询实际写入的数据用于CSV
+	sql_query="SELECT %s AS trade_date, a.ts_code, %s AS strategy, a.closep, a.pct_chg, a.vol, b.vol AS prev_vol, ROUND(a.vol/b.vol,2) AS vol_ratio " \
+		"FROM st_daily a LEFT JOIN st_daily b ON a.ts_code=b.ts_code " \
+		"WHERE a.ts_code=%s AND a.trade_date=%s AND b.trade_date=(" \
+		"SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<%s ORDER BY trade_date DESC LIMIT 1)"
+	inserted=0
+	csv_rows=[]
+	for code in st_codes:
+		mycsr.execute(sql_insert,(trade_date,strategy,code,trade_date,trade_date))
+		inserted+=mycsr.rowcount
+		mycsr.execute(sql_query,(trade_date,strategy,code,trade_date,trade_date))
+		r=mycsr.fetchone()
+		if r:
+			csv_rows.append(list(r))
+	mdb.commit()
+	mycsr.close();mdb.close()
+	print(f'_write_signal [{strategy}]: {len(st_codes)} stocks, {inserted} new records for {trade_date}')
+	if csv_rows:
+		_append_csv(trade_date, csv_rows)
 
 #筛选放量涨幅股票：当日成交量>=前日3倍且涨幅>6%，排除科创板/ST/次新股
 #结果写入 st_daily_signal 表（去重插入）
@@ -629,11 +711,11 @@ def getLiangJiaFangLiang(startDate='', endDate=''):
 			'pct_chg':row[3],'vol':row[4],'prev_vol':row[5],'vol_ratio':row[6]
 		})
 	#写入st_daily_signal（去重插入）
-	sql_insert="INSERT IGNORE INTO st_daily_signal(trade_date,st_code,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
-		"VALUES(%s,%s,%s,%s,%s,%s,%s)"
+	sql_insert="INSERT IGNORE INTO st_daily_signal(trade_date,st_code,strategy,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
+		"VALUES(%s,%s,%s,%s,%s,%s,%s,%s)"
 	inserted=0
 	for r in result:
-		mycsr.execute(sql_insert,(r['trade_date'],r['st_code'],r['closePrice'],r['pct_chg'],r['vol'],r['prev_vol'],r['vol_ratio']))
+		mycsr.execute(sql_insert,(r['trade_date'],r['st_code'],'量价放量',r['closePrice'],r['pct_chg'],r['vol'],r['prev_vol'],r['vol_ratio']))
 		inserted+=mycsr.rowcount
 	mdb.commit()
 	mycsr.close()

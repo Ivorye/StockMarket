@@ -1,4 +1,6 @@
 import time
+import os
+import csv
 import pymysql
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
@@ -6,6 +8,13 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="StockMarket 筛选系统")
 templates = Jinja2Templates(directory="templates")
+
+
+@app.on_event("startup")
+def _init_db():
+    import stockPolicy as sp
+    sp.createSignalTable()
+
 
 # 内存缓存: {cache_key: (timestamp, data)}
 _cache = {}
@@ -22,6 +31,36 @@ def _eastmoney_url(st_code: str) -> str:
 
 
 templates.env.globals['eastmoney_url'] = _eastmoney_url
+
+
+def _save_signals(rows, strategy, trade_date):
+    """将策略筛选结果写入 st_daily_signal 表和 CSV 文件"""
+    if not rows:
+        return
+    try:
+        db = pymysql.connect(host='localhost', user='root', password='P@ssw0rd', database='stockshare')
+        cursor = db.cursor()
+        sql = "INSERT IGNORE INTO st_daily_signal(trade_date,st_code,strategy,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
+              "VALUES(%s,%s,%s,%s,%s,%s,%s,%s)"
+        csv_rows = []
+        for r in rows:
+            cursor.execute(sql, (trade_date, r['st_code'], strategy, r['closep'], r['pct_chg'], r['vol'], r['prev_vol'], r['vol_ratio']))
+            csv_rows.append([trade_date, r['st_code'], strategy, r['closep'], r['pct_chg'], r['vol'], r['prev_vol'], r['vol_ratio']])
+        db.commit()
+        cursor.close()
+        db.close()
+        if csv_rows:
+            output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'output')
+            os.makedirs(output_dir, exist_ok=True)
+            filepath = os.path.join(output_dir, f'signals_{trade_date}.csv')
+            write_header = not os.path.exists(filepath)
+            with open(filepath, 'a', newline='', encoding='utf-8-sig') as f:
+                w = csv.writer(f)
+                if write_header:
+                    w.writerow(['trade_date', 'st_code', 'strategy', 'closePrice', 'pct_chg', 'vol', 'prev_vol', 'vol_ratio'])
+                w.writerows(csv_rows)
+    except Exception as e:
+        print(f'_save_signals [{strategy}] error: {e}')
 
 
 def _run_combined_strategy(date_str=''):
@@ -117,6 +156,11 @@ def _run_combined_strategy(date_str=''):
     s1.sort(key=lambda x: x['pct_chg'], reverse=True)
     s2.sort(key=lambda x: x['pct_chg'], reverse=True)
     combined.sort(key=lambda x: x['pct_chg'], reverse=True)
+
+    # 将策略结果写入 st_daily_signal 表
+    _save_signals(s1, '放量涨幅', today)
+    _save_signals(s2, '跳空缺口', today)
+    _save_signals(combined, '跳空放量涨幅', today)
 
     data = {
         'today': today, 'prev_day': prev_day,
