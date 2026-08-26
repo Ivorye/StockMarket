@@ -6,7 +6,7 @@ db = pymysql.connect(host='localhost', user='root', password='P@ssw0rd', databas
 cursor = db.cursor()
 cursor.execute('SELECT symbol, st_code FROM stocks')
 rows = cursor.fetchall()
-print(f"共 {len(rows)} 只股票，开始更新 20260815 ~ 20260817")
+print(f"共 {len(rows)} 只股票，开始更新 20260822 ~ 20260826")
 
 pro = ts.pro_api(TUSHARE_TOKEN)
 t0 = time.time()
@@ -16,7 +16,7 @@ skipped = 0
 
 for k, (symbol, st_code) in enumerate(rows):
     try:
-        data = pro.daily(ts_code=st_code, start_date='20260815', end_date='20260817')
+        data = pro.daily(ts_code=st_code, start_date='20260822', end_date='20260826')
         if data is None or len(data) == 0:
             skipped += 1
             continue

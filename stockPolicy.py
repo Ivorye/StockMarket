@@ -9,6 +9,31 @@ import mysql.connector
 
 TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
 
+def _check_execution_status(task_name):
+	"""检查任务是否已成功执行过"""
+	try:
+		mdb=_connect_sm()
+		mycsr=mdb.cursor()
+		mycsr.execute("SELECT status FROM st_execution_status WHERE task_name=%s",(task_name,))
+		row=mycsr.fetchone()
+		mycsr.close();mdb.close()
+		return row and row[0]=='Y'
+	except Exception:
+		return False
+
+def _update_execution_status(task_name, status='Y'):
+	"""更新任务执行状态"""
+	try:
+		mdb=_connect_sm()
+		mycsr=mdb.cursor()
+		today=datetime.date.today().strftime('%Y%m%d')
+		sql="INSERT INTO st_execution_status(task_name,exec_date,status) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE exec_date=%s,status=%s"
+		mycsr.execute(sql,(task_name,today,status,today,status))
+		mdb.commit()
+		mycsr.close();mdb.close()
+	except Exception as e:
+		print(f'更新执行状态失败: {e}')
+
 #延迟加载：优先从stocks表读取，回退到tushare API
 _basic_cache = None
 def _get_stock_basic():
@@ -32,11 +57,26 @@ def _get_stock_basic():
 	except Exception:
 		pass
 	#回退到tushare API
-	pro = ts.pro_api(TUSHARE_TOKEN)
-	_basic_cache = pro.query('stock_basic')
-	#缓存到stocks表
-	_store_to_stocks(_basic_cache)
-	return _basic_cache
+	try:
+		pro = ts.pro_api(TUSHARE_TOKEN)
+		_basic_cache = pro.query('stock_basic')
+		#缓存到stocks表
+		_store_to_stocks(_basic_cache)
+		_update_execution_status('stock_basic','Y')
+		return _basic_cache
+	except Exception as e:
+		if _check_execution_status('stock_basic'):
+			print('tushare API失败，st_execution_status状态为Y，从stocks表重试读取')
+			mdb=_connect_sm()
+			mycsr=mdb.cursor()
+			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			rows=mycsr.fetchall()
+			mycsr.close();mdb.close()
+			if rows:
+				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+				return _basic_cache
+		print('tushare API失败且无成功执行记录: %s'%e)
+		raise
 
 def _store_to_stocks(df):
 	mdb=_connect_sm()
