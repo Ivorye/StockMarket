@@ -173,6 +173,7 @@ def _run_combined_strategy(date_str=''):
 
 
 @app.get("/", response_class=HTMLResponse, tags=["page"])
+@app.get("/combined", response_class=HTMLResponse, tags=["page"])
 async def combined_page(request: Request, date: str = ''):
     """跳空放量涨幅合并策略页面"""
     data = _run_combined_strategy(date)
