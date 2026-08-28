@@ -19,6 +19,16 @@ def _init_db():
 # 内存缓存: {cache_key: (timestamp, data)}
 _cache = {}
 _CACHE_TTL = 1800  # 30分钟
+_DB_TIMEOUT_SECONDS = 5
+
+
+def _connect_db():
+    return pymysql.connect(
+        host='localhost', user='root', password='P@ssw0rd', database='stockshare',
+        connect_timeout=_DB_TIMEOUT_SECONDS,
+        read_timeout=_DB_TIMEOUT_SECONDS,
+        write_timeout=_DB_TIMEOUT_SECONDS,
+    )
 
 
 def _eastmoney_url(st_code: str) -> str:
@@ -38,7 +48,7 @@ def _save_signals(rows, strategy, trade_date):
     if not rows:
         return
     try:
-        db = pymysql.connect(host='localhost', user='root', password='P@ssw0rd', database='stockshare')
+        db = _connect_db()
         cursor = db.cursor()
         sql = "INSERT IGNORE INTO st_daily_signal(trade_date,st_code,strategy,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
               "VALUES(%s,%s,%s,%s,%s,%s,%s,%s)"
@@ -73,8 +83,9 @@ def _run_combined_strategy(date_str=''):
         if now - ts < _CACHE_TTL:
             return data
 
-    db = pymysql.connect(host='localhost', user='root', password='P@ssw0rd', database='stockshare')
+    db = _connect_db()
     cursor = db.cursor()
+    cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (_DB_TIMEOUT_SECONDS * 1000,))
 
     # 获取最新交易日和前一个交易日
     cursor.execute("SELECT MAX(trade_date) FROM st_daily")

@@ -109,7 +109,7 @@ def _get_daily_from_db(symbol, startDate, endDate):
 	return DataFrame(rows,columns=['trade_date','open','high','low','close','pct_chg','vol'])
 
 def _connect_sm():
-	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare')
+	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare',connection_timeout=10)
 
 #通用筛选条件：剔除科创板(688)、ST、*ST、次新股(2021年后上市且上市晚于startDate)
 def _should_skip(df, i, startDate=''):
@@ -548,19 +548,7 @@ def buildDailyTable(startDate='', endDate=''):
 	tables=[t[0] for t in mycsr.fetchall()]
 	total=len(tables)
 	#增量：批量SQL对比每张gp表的最新日期与st_daily的最新日期，只处理有新数据的表
-	union_parts=[]
-	for table in tables:
-		sym=table[2:]
-		ts_code=sym2ts.get(sym)
-		if ts_code:
-			union_parts.append("SELECT '%s' AS ts_code,MAX(trade_date) AS dt FROM `%s`"%(ts_code,table))
-	if union_parts:
-		gp_q=" UNION ALL ".join(union_parts)
-		mycsr.execute("SELECT g.ts_code FROM (%s) g LEFT JOIN (SELECT ts_code,MAX(trade_date) AS dt FROM st_daily GROUP BY ts_code) s ON g.ts_code=s.ts_code WHERE g.dt!=s.dt OR s.dt IS NULL"%gp_q)
-		stale={r[0] for r in mycsr.fetchall()}
-	else:
-		stale=set()
-	need_update=[(t,t[2:],sym2ts.get(t[2:])) for t in tables if sym2ts.get(t[2:]) in stale]
+	need_update=[(t,t[2:],sym2ts.get(t[2:])) for t in tables if sym2ts.get(t[2:])]
 	if not need_update:
 		print(time.ctime(),'st_daily已同步，%d只股票均已是最新，无需更新'%total)
 		mycsr.close();mdb.close()
@@ -572,27 +560,29 @@ def buildDailyTable(startDate='', endDate=''):
 	for k,(table,sym,ts_code) in enumerate(need_update):
 		try:
 			#同步该股票gp表的全部数据（INSERT IGNORE自动去重）
-			mycsr.execute("SELECT trade_date,openp,high,low,closep,pct_chg,vol,amount FROM `%s`"%table)
+			mycsr.execute("SELECT DATE_FORMAT(trade_date,'%%Y%%m%%d'),openp,high,low,closep,pct_chg,vol,amount FROM `%s` WHERE trade_date BETWEEN %%s AND %%s"%table,(startDate,endDate))
 			rows=mycsr.fetchall()
 			if not rows:
 				continue
-			sql_check="SELECT trade_date FROM st_daily WHERE ts_code=%s"
-			mycsr.execute(sql_check,(ts_code,))
+			sql_check="SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date BETWEEN %s AND %s"
+			mycsr.execute(sql_check,(ts_code,startDate,endDate))
 			existing=set(r[0] for r in mycsr.fetchall())
 			vals=[]
 			for row in rows:
-				td=str(row[0])
+				td=row[0]
 				if td not in existing:
 					vals.append((ts_code,sym,td,row[1],row[2],row[3],row[4],row[5],row[6],row[7]))
 			if vals:
 				mycsr.executemany(sql_insert,vals)
 				count+=len(vals)
-				if(count%500==0):
+				if(k%100==99):
 					mdb.commit()
 		except Exception:
 			pass
 		if(k%500==499):
 			print(time.ctime(),k+1,'processed,',count,'rows inserted')
+		if(k%100==99):
+			mdb.commit()
 	mdb.commit()
 	#清理60个交易日以前的数据，防止st_daily无限膨胀（源数据在gp表中）
 	mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 1 OFFSET 59")
