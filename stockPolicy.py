@@ -471,6 +471,82 @@ def getZhangFu(startDate='', endDate='', pct=30):
 #6个点代表强势，相对于T-1或T-2日放量2倍以上且涨超6个点，寻找这样的股票。西藏珠峰7.2日启动，中泰股份20210826晚关注到
 
 #获取Excel里的股票list，返回一个list出去
+def _smooth_uptrend_metrics(closes):
+	"""Calculate trend metrics for closes ordered from oldest to newest."""
+	n = len(closes)
+	if n < 2 or closes[0] <= 0:
+		return None
+	x_mean = (n - 1) / 2
+	y_mean = sum(closes) / n
+	ss_x = sum((x - x_mean) ** 2 for x in range(n))
+	ss_y = sum((price - y_mean) ** 2 for price in closes)
+	if ss_x == 0 or ss_y == 0:
+		return None
+	slope = sum((x - x_mean) * (closes[x] - y_mean) for x in range(n)) / ss_x
+	intercept = y_mean - slope * x_mean
+	ss_res = sum((closes[x] - (intercept + slope * x)) ** 2 for x in range(n))
+	peak = closes[0]
+	max_drawdown = 0
+	for price in closes[1:]:
+		peak = max(peak, price)
+		max_drawdown = max(max_drawdown, (peak - price) / peak)
+	return {
+		'gain_pct': (closes[-1] - closes[0]) / closes[0] * 100,
+		'slope': slope,
+		'r_squared': max(0, 1 - ss_res / ss_y),
+		'up_ratio': sum(closes[x] >= closes[x - 1] for x in range(1, n)) / (n - 1),
+		'max_drawdown_pct': max_drawdown * 100,
+	}
+
+
+def getSmoothUptrend(trading_days=30, min_gain_pct=30, min_r_squared=0.8,
+		min_up_ratio=0.6, max_drawdown_pct=10, endDate=''):
+	"""Find stocks with a smooth rising trend over the latest trading days."""
+	if trading_days < 2:
+		raise ValueError('trading_days must be at least 2')
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	if endDate:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<=%s ORDER BY trade_date DESC LIMIT %s", (endDate, trading_days))
+	else:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT %s", (trading_days,))
+	dates = [row[0] for row in mycsr.fetchall()]
+	if len(dates) < trading_days:
+		mycsr.close();mdb.close()
+		print(f'st_daily has fewer than {trading_days} trading days')
+		return []
+	dates.reverse()
+	start_date, signal_date = dates[0], dates[-1]
+	placeholders = ','.join(['%s'] * len(dates))
+	mycsr.execute("SELECT ts_code,trade_date,closep FROM st_daily "
+		f"WHERE trade_date IN ({placeholders}) ORDER BY ts_code,trade_date", tuple(dates))
+	stock_closes = {}
+	for ts_code, trade_date, closep in mycsr.fetchall():
+		stock_closes.setdefault(ts_code, []).append(float(closep))
+	mycsr.close();mdb.close()
+	df = _get_stock_basic()
+	ts_to_idx = {df.ts_code[i]: i for i in range(len(df))}
+	result = []
+	for ts_code, closes in stock_closes.items():
+		idx = ts_to_idx.get(ts_code)
+		if idx is None or _should_skip(df, idx, start_date) or len(closes) != trading_days:
+			continue
+		metrics = _smooth_uptrend_metrics(closes)
+		if (metrics and metrics['gain_pct'] > min_gain_pct and metrics['slope'] > 0
+				and metrics['r_squared'] >= min_r_squared
+				and metrics['up_ratio'] >= min_up_ratio
+				and metrics['max_drawdown_pct'] <= max_drawdown_pct):
+			result.append((ts_code, metrics))
+	result.sort(key=lambda item: (item[1]['r_squared'], item[1]['gain_pct']), reverse=True)
+	codes = [item[0] for item in result]
+	for ts_code, metrics in result:
+		print(ts_code, 'gain:%.2f%% R2:%.3f up-days:%.1f%% max-drawdown:%.2f%%' % (
+			metrics['gain_pct'], metrics['r_squared'], metrics['up_ratio'] * 100, metrics['max_drawdown_pct']))
+	if codes:
+		_write_signal(codes, f'{trading_days}day-smooth-up-{min_gain_pct}pct', signal_date)
+	return codes
+
+
 def getlistgupiao(file):
 	if(file is None or file == ''):
 		print('file must be input');return
@@ -579,7 +655,7 @@ def _write_signal(st_codes, strategy, trade_date=''):
 		mycsr.close();mdb.close()
 		return
 	sql_insert="INSERT IGNORE INTO st_daily_signal(trade_date,st_code,strategy,closePrice,pct_chg,vol,prev_vol,vol_ratio) " \
-		"SELECT a.ts_code, %s, %s, a.closep, a.pct_chg, a.vol, b.vol, ROUND(a.vol/b.vol,2) " \
+		"SELECT %s, a.ts_code, %s, a.closep, a.pct_chg, a.vol, b.vol, ROUND(a.vol/b.vol,2) " \
 		"FROM st_daily a LEFT JOIN st_daily b ON a.ts_code=b.ts_code " \
 		"WHERE a.ts_code=%s AND a.trade_date=%s AND b.trade_date=(" \
 		"SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<%s ORDER BY trade_date DESC LIMIT 1)"

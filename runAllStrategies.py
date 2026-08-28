@@ -78,6 +78,15 @@ def run_all_strategies():
     except Exception as e:
         logger.error(f"区间涨幅筛选失败: {e}")
 
+    # 策略6: 最近30個交易日平緩上漲且漲幅超過30%
+    logger.info("--- [6/6] 30日平緩上漲篩選 ---")
+    try:
+        r = sp.getSmoothUptrend(trading_days=30, min_gain_pct=30)
+        results['30日平緩上漲30%'] = r
+        logger.info(f"30日平緩上漲30%: {len(r)} 只")
+    except Exception as e:
+        logger.error(f"30日平緩上漲篩選失敗: {e}")
+
     # 汇总输出
     logger.info("========== 策略筛选结果汇总 ==========")
     total = 0

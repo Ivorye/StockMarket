@@ -64,6 +64,23 @@
         .table-scroll { max-height: 600px; overflow-y: auto; }
         .highlight-row { background: #fffbe6 !important; }
         .section-title { font-size: 15px; font-weight: 600; margin: 16px 14px 8px; color: #333; }
+        .strategy-note { padding: 14px 16px; color: #666; font-size: 13px; line-height: 1.6; border-bottom: 1px solid #f0f0f0; }
+        .metric { min-width: 145px; }
+        .metric-value { font-variant-numeric: tabular-nums; }
+        .metric-track { height: 4px; margin-top: 6px; background: #f0f0f0; overflow: hidden; }
+        .metric-fill { display: block; height: 100%; background: #cf1322; }
+        .metric-fill.drawdown { background: #389e0d; }
+        .sortable { cursor: pointer; user-select: none; }
+        .sortable:hover { color: #1677ff; }
+        .sortable:focus-visible { outline: 2px solid #1677ff; outline-offset: -2px; }
+        @media (max-width: 720px) {
+            .container { padding: 16px 12px; }
+            .controls, .legend { align-items: flex-start; flex-direction: column; }
+            .tabs { overflow-x: auto; }
+            .tab { flex: 0 0 auto; padding: 10px 14px; min-height: 44px; }
+            .panel { overflow-x: auto; }
+            .table-scroll { min-width: 820px; }
+        }
     </style>
 </head>
 <body>
@@ -112,13 +129,38 @@
     </div>
 
     <div class="tabs">
-        <div class="tab active" onclick="switchTab('combined')">合并策略 ({{ data.combined | length }})</div>
-        <div class="tab" onclick="switchTab('gap')">跳空缺口 ({{ data.s2 | length }})</div>
-        <div class="tab" onclick="switchTab('surge')">放量涨幅 ({{ data.s1 | length }})</div>
+        <div class="tab active" onclick="switchTab(event, 'smooth')">30日平缓上涨 ({{ data.smooth | length }})</div>
+        <div class="tab" onclick="switchTab(event, 'combined')">合并策略 ({{ data.combined | length }})</div>
+        <div class="tab" onclick="switchTab(event, 'gap')">跳空缺口 ({{ data.s2 | length }})</div>
+        <div class="tab" onclick="switchTab(event, 'surge')">放量涨幅 ({{ data.s1 | length }})</div>
+    </div>
+
+    <div class="panel active" id="panel-smooth">
+        <div class="strategy-note">区间 {{ data.smooth_start }} 至 {{ data.today }}，默认按30日涨幅排序。条件：涨幅&gt;30%、R²≥0.8、上涨日占比≥60%、最大回撤≤10%。点击栏名可排序。</div>
+        {% if data.smooth %}
+        <div class="table-scroll"><table id="smooth-table">
+            <thead><tr><th>#</th><th>股票</th><th>名称</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(3)" onkeydown="if(event.key==='Enter')sortSmooth(3)">30日涨幅 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(4)" onkeydown="if(event.key==='Enter')sortSmooth(4)">最大回撤 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(5)" onkeydown="if(event.key==='Enter')sortSmooth(5)">R² ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(6)" onkeydown="if(event.key==='Enter')sortSmooth(6)">上涨日占比 ↕</th>
+                <th>起始价</th><th>最新价</th></tr></thead>
+            <tbody>{% for r in data.smooth %}<tr>
+                <td>{{ loop.index }}</td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a></td>
+                <td>{{ r.name }}</td>
+                <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
+                <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
+                <td data-value="{{ r.r_squared }}">{{ "%.3f"|format(r.r_squared) }}</td>
+                <td data-value="{{ r.up_ratio }}">{{ "%.1f"|format(r.up_ratio) }}%</td>
+                <td>{{ "%.2f"|format(r.start_close) }}</td><td>{{ "%.2f"|format(r.end_close) }}</td>
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<div class="empty">所选日期前没有股票同时满足完整30个交易日与平缓上涨条件。</div>{% endif %}
     </div>
 
     <!-- 合并策略面板 -->
-    <div class="panel active" id="panel-combined">
+    <div class="panel" id="panel-combined">
         {% if data.combined %}
         <div class="table-scroll">
         <table>
@@ -301,11 +343,25 @@
 </div>
 
 <script>
-function switchTab(name) {
+function switchTab(event, name) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     event.target.classList.add('active');
     document.getElementById('panel-' + name).classList.add('active');
+}
+let smoothSort = { column: 3, ascending: false };
+function sortSmooth(column) {
+    const body = document.querySelector('#smooth-table tbody');
+    if (!body) return;
+    smoothSort.ascending = smoothSort.column === column ? !smoothSort.ascending : false;
+    smoothSort.column = column;
+    const rows = Array.from(body.rows);
+    rows.sort((a, b) => {
+        const av = Number(a.cells[column].dataset.value);
+        const bv = Number(b.cells[column].dataset.value);
+        return smoothSort.ascending ? av - bv : bv - av;
+    });
+    rows.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
 }
 </script>
 </body>

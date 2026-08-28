@@ -19,7 +19,7 @@ def _init_db():
 # 内存缓存: {cache_key: (timestamp, data)}
 _cache = {}
 _CACHE_TTL = 1800  # 30分钟
-_DB_TIMEOUT_SECONDS = 5
+_DB_TIMEOUT_SECONDS = 15
 
 
 def _connect_db():
@@ -100,7 +100,8 @@ def _run_combined_strategy(date_str=''):
     dates = cursor.fetchall()
     if len(dates) < 2:
         db.close()
-        return {'today': latest_date, 'prev_day': '', 's1': [], 's2': [], 'combined': [], 'latest_date': latest_date}
+        return {'today': latest_date, 'prev_day': '', 's1': [], 's2': [], 'combined': [],
+                'smooth': [], 'smooth_start': '', 'latest_date': latest_date}
 
     today = dates[0][0]
     prev_day = dates[1][0]
@@ -145,11 +146,46 @@ def _run_combined_strategy(date_str=''):
         if has_gap and is_surge and big_gain:
             combined.append(row)
 
-    db.close()
-
     s1.sort(key=lambda x: x['pct_chg'], reverse=True)
     s2.sort(key=lambda x: x['pct_chg'], reverse=True)
     combined.sort(key=lambda x: x['pct_chg'], reverse=True)
+
+    import stockPolicy as sp
+    if date_str:
+        cursor.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<=%s ORDER BY trade_date DESC LIMIT 30", (today,))
+    else:
+        cursor.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 30")
+    smooth_dates = [row[0] for row in cursor.fetchall()][::-1]
+    smooth = []
+    if len(smooth_dates) == 30:
+        placeholders = ','.join(['%s'] * 30)
+        cursor.execute(
+            "SELECT d.ts_code,COALESCE(s.fullname,''),d.closep FROM st_daily d "
+            "LEFT JOIN stocks s ON s.st_code=d.ts_code "
+            f"WHERE d.trade_date IN ({placeholders}) AND d.symbol NOT LIKE '688%%' "
+            "ORDER BY d.ts_code,d.trade_date", tuple(smooth_dates))
+        grouped = {}
+        for st_code, fullname, closep in cursor.fetchall():
+            item = grouped.setdefault(st_code, {'name': fullname, 'closes': []})
+            item['closes'].append(float(closep))
+        for st_code, item in grouped.items():
+            if len(item['closes']) != 30:
+                continue
+            metrics = sp._smooth_uptrend_metrics(item['closes'])
+            if (metrics and metrics['gain_pct'] > 30 and metrics['slope'] > 0
+                    and metrics['r_squared'] >= 0.8 and metrics['up_ratio'] >= 0.6
+                    and metrics['max_drawdown_pct'] <= 10):
+                smooth.append({
+                    'st_code': st_code, 'name': item['name'],
+                    'gain_pct': round(metrics['gain_pct'], 2),
+                    'max_drawdown_pct': round(metrics['max_drawdown_pct'], 2),
+                    'r_squared': round(metrics['r_squared'], 3),
+                    'up_ratio': round(metrics['up_ratio'] * 100, 1),
+                    'start_close': round(item['closes'][0], 2),
+                    'end_close': round(item['closes'][-1], 2),
+                })
+        smooth.sort(key=lambda x: x['gain_pct'], reverse=True)
+    db.close()
 
     # 将策略结果写入 st_daily_signal 表
     _save_signals(s1, '放量涨幅', today)
@@ -159,6 +195,8 @@ def _run_combined_strategy(date_str=''):
     data = {
         'today': today, 'prev_day': prev_day,
         's1': s1, 's2': s2, 'combined': combined,
+        'smooth': smooth,
+        'smooth_start': smooth_dates[0] if smooth_dates else '',
         'latest_date': latest_date,
     }
 
