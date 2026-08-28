@@ -77,14 +77,14 @@ def _run_combined_strategy(date_str=''):
     cursor = db.cursor()
 
     # 获取最新交易日和前一个交易日
-    cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+    cursor.execute("SELECT MAX(trade_date) FROM st_daily")
     latest_date = cursor.fetchone()[0]
 
     if date_str:
         target = date_str
-        cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` WHERE trade_date <= %s ORDER BY trade_date DESC LIMIT 2', (target,))
+        cursor.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date <= %s ORDER BY trade_date DESC LIMIT 2", (target,))
     else:
-        cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` ORDER BY trade_date DESC LIMIT 2')
+        cursor.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 2")
 
     dates = cursor.fetchall()
     if len(dates) < 2:
@@ -94,62 +94,45 @@ def _run_combined_strategy(date_str=''):
     today = dates[0][0]
     prev_day = dates[1][0]
 
-    cursor.execute('SELECT symbol, st_code FROM stocks')
-    stocks = cursor.fetchall()
-
     s1, s2, combined = [], [], []
 
-    for symbol, st_code in stocks:
-        if symbol.startswith('688'):
-            continue
-        table = '`gp%s`' % symbol
-        try:
-            cursor.execute(
-                'SELECT trade_date, openp, high, low, closep, pct_chg, vol '
-                'FROM %s WHERE trade_date IN (%%s, %%s) ORDER BY trade_date' % table,
-                (prev_day, today))
-            rows = cursor.fetchall()
-            if len(rows) != 2:
-                continue
+    cursor.execute(
+        "SELECT t.symbol, t.ts_code, t.openp, t.high, t.low, t.closep, "
+        "t.pct_chg, t.vol, p.high, p.closep, p.vol "
+        "FROM st_daily t JOIN st_daily p ON p.ts_code=t.ts_code "
+        "WHERE t.trade_date=%s AND p.trade_date=%s "
+        "AND t.symbol NOT LIKE '688%%'",
+        (today, prev_day))
 
-            prev_data, today_data = rows
-            prev_high = prev_data[2]
-            prev_close = prev_data[4]
-            prev_vol = prev_data[6]
-            today_open = today_data[1]
-            today_high = today_data[2]
-            today_low = today_data[3]
-            today_close = today_data[4]
-            today_pct_chg = today_data[5]
-            today_vol = today_data[6]
+    for row_data in cursor.fetchall():
+        (symbol, st_code, today_open, today_high, today_low,
+         today_close, today_pct_chg, today_vol,
+         prev_high, prev_close, prev_vol) = row_data
 
-            vol_ratio = round(today_vol / prev_vol, 2) if prev_vol > 0 else 0
-            gap_size = round(today_low - prev_high, 2) if today_low > prev_high else 0
+        vol_ratio = round(today_vol / prev_vol, 2) if prev_vol > 0 else 0
+        gap_size = round(today_low - prev_high, 2) if today_low > prev_high else 0
 
-            has_gap = today_low > prev_high
-            is_surge = prev_vol > 0 and today_vol >= prev_vol * 3
-            big_gain = today_pct_chg > 6
+        has_gap = today_low > prev_high
+        is_surge = prev_vol > 0 and today_vol >= prev_vol * 3
+        big_gain = today_pct_chg > 6
 
-            row = {
-                'symbol': symbol, 'st_code': st_code,
-                'openp': today_open, 'high': today_high,
-                'low': today_low, 'closep': today_close,
-                'pct_chg': round(today_pct_chg, 2),
-                'vol': today_vol, 'prev_vol': prev_vol,
-                'vol_ratio': vol_ratio, 'gap_size': gap_size,
-                'prev_high': prev_high, 'prev_close': prev_close,
-                'has_gap': has_gap, 'is_surge': is_surge, 'big_gain': big_gain,
-            }
+        row = {
+            'symbol': symbol, 'st_code': st_code,
+            'openp': today_open, 'high': today_high,
+            'low': today_low, 'closep': today_close,
+            'pct_chg': round(today_pct_chg, 2),
+            'vol': today_vol, 'prev_vol': prev_vol,
+            'vol_ratio': vol_ratio, 'gap_size': gap_size,
+            'prev_high': prev_high, 'prev_close': prev_close,
+            'has_gap': has_gap, 'is_surge': is_surge, 'big_gain': big_gain,
+        }
 
-            if is_surge and big_gain:
-                s1.append(row)
-            if has_gap:
-                s2.append(row)
-            if has_gap and is_surge and big_gain:
-                combined.append(row)
-
-        except Exception:
-            pass
+        if is_surge and big_gain:
+            s1.append(row)
+        if has_gap:
+            s2.append(row)
+        if has_gap and is_surge and big_gain:
+            combined.append(row)
 
     db.close()
 
