@@ -7,7 +7,7 @@ def connectDB():
 	db=pymysql.connect(host='localhost',
 		user='root',
 		password='P@ssw0rd',
-		database='stockshare')
+		database='stockshare',connect_timeout=10,read_timeout=30,write_timeout=30)
 	return db
 
 def _escape_table_name(name):
@@ -86,32 +86,10 @@ def getStockBasicFromDB():
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表
 #open、close、change是SQL关键字，列名使用openp、closep、changes替代
 def createStockTable(df=None):
-	l=len(df)
 	db=connectDB()
 	cursor=db.cursor()
-	for i in range(0,l):
-		table=_escape_table_name("gp%s" % df.loc[i].symbol)
-		sql="CREATE TABLE %s (" \
-			"`trade_date` VARCHAR(8) NOT NULL," \
-			"`openp` FLOAT NOT NULL," \
-			"`high` FLOAT NOT NULL," \
-			"`low` FLOAT NOT NULL," \
-			"`closep` FLOAT NOT NULL," \
-			"`preclose` FLOAT NOT NULL," \
-			"`changes` FLOAT NOT NULL," \
-			"`pct_chg` FLOAT NOT NULL," \
-			"`vol` FLOAT NOT NULL," \
-			"`amount` FLOAT NOT NULL," \
-			"PRIMARY KEY (`trade_date`)," \
-			"UNIQUE INDEX `trade_date_UNIQUE` (`trade_date` ASC) VISIBLE)" % table
-		try:
-			cursor.execute(sql)
-			if i % 50 == 0:
-				print(i, " tables have been created")
-			if i == l-1:
-				print(i, " All tables have been created")
-		except Exception as e:
-			print("建表异常 %s: %s" % (df.loc[i].symbol, e))
+	cursor.execute("CREATE TABLE IF NOT EXISTS st_daily (ts_code VARCHAR(12) NOT NULL,symbol VARCHAR(6) NOT NULL,trade_date VARCHAR(8) NOT NULL,openp FLOAT,high FLOAT,low FLOAT,closep FLOAT,preclose FLOAT,changes FLOAT,pct_chg FLOAT,vol FLOAT,amount FLOAT,PRIMARY KEY (ts_code,trade_date),INDEX idx_trade_date (trade_date),INDEX idx_symbol (symbol))")
+	db.commit()
 	db.close()
 
 
@@ -155,16 +133,11 @@ def insertNewTransactonRecordForAllStocks(df=None,start_date='',end_date=''):
 			continue
 		if data is None or len(data) == 0:
 			continue
-		table=_escape_table_name("gp%s" % df.loc[k].symbol)
 		ln=len(data)
+		sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
 		for i in range(0,ln):
-			sql0="select trade_date from %s where trade_date=%%s" % table
-			sql="insert into %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) " \
-				"values(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)" % table
-			result=cursor.execute(sql0, (data.loc[i].trade_date,))
-			if result==0:
-				try:
-					cursor.execute(sql, (
+			try:
+					cursor.execute(sql, (df.loc[k].ts_code,df.loc[k].symbol,
 						data.loc[i].trade_date,
 						float(data.loc[i].open),
 						float(data.loc[i].high),
@@ -182,9 +155,9 @@ def insertNewTransactonRecordForAllStocks(df=None,start_date='',end_date=''):
 					if i == ln-1:
 						db.commit()
 						print(i, " All records have been loaded to database")
-				except Exception as e:
-					print("插入交易记录异常 %s %s: %s" % (df.loc[k].symbol, data.loc[i].trade_date, e))
-					db.rollback()
+			except Exception as e:
+				print("插入交易记录异常 %s %s: %s" % (df.loc[k].symbol, data.loc[i].trade_date, e))
+				db.rollback()
 		if k % 50 == 0:
 			print(k, " tables have been processed")
 		if k == l-1:
@@ -199,26 +172,8 @@ def getJDZF(df='',start_date='',end_date='',rate=''):
 	db=connectDB()
 	cursor=db.cursor()
 	lst=[]
-	for i in range(0,l):
-		symbol=df.loc[i].symbol
-		table=_escape_table_name("gp%s" % symbol)
-		sql="select closep from %s where trade_date=%%s" % table
-		try:
-			cursor.execute(sql, (start_date,))
-			p1 = cursor.fetchall()
-			cursor.execute(sql, (end_date,))
-			p2 = cursor.fetchall()
-			p3 = p1[0][0]
-			p4 = p2[0][0]
-			ratio=1+rate/100
-			if p4>p3*ratio:
-				lst.append(symbol)
-			if i % 500 == 0:
-				print(i, " records processed")
-			if i == l-1:
-				print(i, " All records processed")
-		except Exception as e:
-			print("查询涨幅异常 %s: %s" % (symbol, e))
+	cursor.execute("SELECT a.symbol FROM st_daily a JOIN st_daily b ON b.ts_code=a.ts_code WHERE a.trade_date=%s AND b.trade_date=%s AND b.closep>a.closep*(1+%s/100)",(start_date,end_date,rate))
+	lst=[r[0] for r in cursor.fetchall()]
 	db.close()
 	return lst
 
@@ -238,10 +193,9 @@ def incrementalUpdateDailyData(df=None, lookback_days=30):
 	for k in range(total):
 		sym=df.loc[k].symbol
 		ts_code=df.loc[k].ts_code
-		table=_escape_table_name("gp%s"%sym)
 		#获取该表已有的所有日期（用于检测断层）
 		try:
-			cursor.execute("SELECT trade_date FROM %s ORDER BY trade_date"%table)
+			cursor.execute("SELECT trade_date FROM st_daily WHERE ts_code=%s ORDER BY trade_date",(ts_code,))
 			existing=set(r[0] for r in cursor.fetchall())
 		except Exception:
 			existing=set()
@@ -292,8 +246,7 @@ def incrementalUpdateDailyData(df=None, lookback_days=30):
 				has_major_gap=True
 				break
 		#逐行插入（INSERT IGNORE跳过已有行，不影响其他行）
-		sql="INSERT IGNORE INTO %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) " \
-			"values(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)"%table
+		sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
 		inserted=0
 		for i in range(len(data)):
 			td=data.iloc[i].trade_date
@@ -301,7 +254,7 @@ def incrementalUpdateDailyData(df=None, lookback_days=30):
 				continue
 			try:
 				cursor.execute(sql,(
-					td,
+					ts_code,sym,td,
 					float(data.iloc[i].open),
 					float(data.iloc[i].high),
 					float(data.iloc[i].low),

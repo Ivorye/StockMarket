@@ -93,14 +93,13 @@ def _store_to_stocks(df):
 	mycsr.close()
 	mdb.close()
 
-#从gp{symbol}表查询日线数据，返回与ts.pro_bar相同结构的DataFrame
+# 从 st_daily 查询日线数据，返回与 ts.pro_bar 相同结构的 DataFrame
 #columns: trade_date, open, high, low, close, pct_chg, vol
 def _get_daily_from_db(symbol, startDate, endDate):
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
-	table='`gp%s`'%symbol
-	sql="SELECT trade_date,openp,high,low,closep,pct_chg,vol FROM %s WHERE trade_date BETWEEN %%s AND %%s ORDER BY trade_date DESC"%table
-	mycsr.execute(sql,(startDate,endDate))
+	sql="SELECT trade_date,openp,high,low,closep,pct_chg,vol FROM st_daily WHERE symbol=%s AND trade_date BETWEEN %s AND %s ORDER BY trade_date DESC"
+	mycsr.execute(sql,(symbol,startDate,endDate))
 	rows=mycsr.fetchall()
 	mycsr.close()
 	mdb.close()
@@ -497,6 +496,8 @@ def createDailyTable():
 		"high FLOAT," \
 		"low FLOAT," \
 		"closep FLOAT," \
+		"preclose FLOAT," \
+		"changes FLOAT," \
 		"pct_chg FLOAT," \
 		"vol FLOAT," \
 		"amount FLOAT," \
@@ -510,92 +511,10 @@ def createDailyTable():
 	mdb.close()
 	print('st_daily table created')
 
-#将所有 gp{symbol} 表的日线数据汇总到 st_daily 表
+# 舊排程相容入口；日線載入現在直接寫入 st_daily。
 def buildDailyTable(startDate='', endDate=''):
-	if(startDate is None or startDate == ''):
-		startDate=(datetime.date.today()-datetime.timedelta(days=7)).strftime('%Y%m%d')
-	if(endDate is None or endDate == ''):
-		endDate=datetime.date.today().strftime('%Y%m%d')
-	mdb=_connect_sm()
-	mycsr=mdb.cursor()
-	#获取 symbol → ts_code 映射
-	sym2ts={}
-	try:
-		mycsr.execute("SELECT symbol, st_code FROM stocks")
-		for row in mycsr.fetchall():
-			sym2ts[row[0]]=row[1]
-	except Exception:
-		pass
-	if not sym2ts:
-		print('stocks表为空，从tushare API获取映射...')
-		try:
-			pro=ts.pro_api(TUSHARE_TOKEN)
-			basic=pro.query('stock_basic',exchange='',list_status='L',fields='ts_code,symbol')
-			for _,r in basic.iterrows():
-				sym2ts[r['symbol']]=r['ts_code']
-		except Exception as e:
-			print('tushare API调用失败(%s)，使用规则映射...'%e)
-	if not sym2ts:
-		mycsr.execute("SHOW TABLES LIKE 'gp%%'")
-		for (t,) in mycsr.fetchall():
-			sym=t[2:]
-			if(sym.startswith('6')):
-				sym2ts[sym]=sym+'.SH'
-			else:
-				sym2ts[sym]=sym+'.SZ'
-		print('已通过规则生成 %d 条 symbol→ts_code 映射'%len(sym2ts))
-	mycsr.execute("SHOW TABLES LIKE 'gp%%'")
-	tables=[t[0] for t in mycsr.fetchall()]
-	total=len(tables)
-	#增量：批量SQL对比每张gp表的最新日期与st_daily的最新日期，只处理有新数据的表
-	need_update=[(t,t[2:],sym2ts.get(t[2:])) for t in tables if sym2ts.get(t[2:])]
-	if not need_update:
-		print(time.ctime(),'st_daily已同步，%d只股票均已是最新，无需更新'%total)
-		mycsr.close();mdb.close()
-		return
-	print(time.ctime(),'-------- buildDailyTable begin (%d/%d stocks need update)---------------'%(len(need_update),total))
-	sql_insert="INSERT IGNORE INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,pct_chg,vol,amount) " \
-		"VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-	count=0
-	for k,(table,sym,ts_code) in enumerate(need_update):
-		try:
-			#同步该股票gp表的全部数据（INSERT IGNORE自动去重）
-			mycsr.execute("SELECT DATE_FORMAT(trade_date,'%%Y%%m%%d'),openp,high,low,closep,pct_chg,vol,amount FROM `%s` WHERE trade_date BETWEEN %%s AND %%s"%table,(startDate,endDate))
-			rows=mycsr.fetchall()
-			if not rows:
-				continue
-			sql_check="SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date BETWEEN %s AND %s"
-			mycsr.execute(sql_check,(ts_code,startDate,endDate))
-			existing=set(r[0] for r in mycsr.fetchall())
-			vals=[]
-			for row in rows:
-				td=row[0]
-				if td not in existing:
-					vals.append((ts_code,sym,td,row[1],row[2],row[3],row[4],row[5],row[6],row[7]))
-			if vals:
-				mycsr.executemany(sql_insert,vals)
-				count+=len(vals)
-				if(k%100==99):
-					mdb.commit()
-		except Exception:
-			pass
-		if(k%500==499):
-			print(time.ctime(),k+1,'processed,',count,'rows inserted')
-		if(k%100==99):
-			mdb.commit()
-	mdb.commit()
-	#清理60个交易日以前的数据，防止st_daily无限膨胀（源数据在gp表中）
-	mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 1 OFFSET 59")
-	cutoff=mycsr.fetchone()
-	if cutoff:
-		mycsr.execute("DELETE FROM st_daily WHERE trade_date<%s",(cutoff[0],))
-		deleted=mycsr.rowcount
-		mdb.commit()
-		if deleted>0:
-			print(time.ctime(),'st_daily cleaned: %d old rows removed (before %s)'%(deleted,cutoff[0]))
-	mycsr.close()
-	mdb.close()
-	print(time.ctime(),'-------- buildDailyTable end: %d rows inserted---------------'%count)
+	createDailyTable()
+	print(time.ctime(),'st_daily is the primary daily-data table; no aggregation needed')
 
 #创建 st_daily_signal 表（策略信号表）
 def createSignalTable():

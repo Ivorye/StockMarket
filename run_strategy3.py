@@ -10,12 +10,12 @@ stocks = cursor.fetchall()
 print(f'共 {len(stocks)} 只股票')
 
 # 找到最新的交易日期
-cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+cursor.execute('SELECT MAX(trade_date) FROM st_daily')
 latest_date = cursor.fetchone()[0]
 print(f'最新交易日期: {latest_date}')
 
 # 获取最近5个交易日
-cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` ORDER BY trade_date DESC LIMIT 5')
+cursor.execute('SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 5')
 dates = cursor.fetchall()
 if len(dates) < 5:
     print('交易数据不足，需要至少5个交易日')
@@ -31,20 +31,24 @@ print(f'分析日期: {[d[0] for d in dates]}')
 # 当前价格高于A日收盘价
 multiple = 2  # 量比倍数
 
+date_list = [d[0] for d in dates]
+placeholders = ','.join(['%s'] * 5)
+cursor.execute('''SELECT d.symbol, s.st_code, d.trade_date, d.openp, d.high, d.low,
+                         d.closep, d.pct_chg, d.vol
+                  FROM st_daily d JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date IN (''' + placeholders + ''')
+                    AND d.symbol NOT LIKE '688%%'
+                  ORDER BY d.symbol, d.trade_date DESC''', date_list)
+stock_rows = {}
+for row in cursor.fetchall():
+    stock_rows.setdefault((row[0], row[1]), []).append(row[2:])
+
 result = []
-for symbol, st_code in stocks:
+for (symbol, st_code), rows in stock_rows.items():
     # 排除科创板(688)
     if symbol.startswith('688'):
         continue
-    table = '`gp%s`' % symbol
     try:
-        # 查询最近5天的数据
-        date_list = [d[0] for d in dates]
-        placeholders = ','.join(['%s'] * 5)
-        cursor.execute('''SELECT trade_date, openp, high, low, closep, pct_chg, vol 
-                         FROM %s WHERE trade_date IN (%s) ORDER BY trade_date DESC''' % (table, placeholders), date_list)
-        rows = cursor.fetchall()
-        
         if len(rows) >= 4:
             # rows[0]=最新日, rows[1]=前1天, rows[2]=前2天, rows[3]=前3天
             # 可能还有 rows[4]=前4天

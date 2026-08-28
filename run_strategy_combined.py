@@ -10,12 +10,12 @@ stocks = cursor.fetchall()
 print(f'共 {len(stocks)} 只股票')
 
 # 找到最新的交易日期
-cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+cursor.execute('SELECT MAX(trade_date) FROM st_daily')
 latest_date = cursor.fetchone()[0]
 print(f'最新交易日期: {latest_date}')
 
 # 获取前一个交易日
-cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` ORDER BY trade_date DESC LIMIT 2')
+cursor.execute('SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 2')
 dates = cursor.fetchall()
 if len(dates) < 2:
     print('交易数据不足')
@@ -31,55 +31,18 @@ print(f'筛选日期: {today} vs {prev_day}')
 # 1. 向上跳空缺口：今日最低价 > 昨日最高价
 # 2. 放量：今日成交量 >= 昨日成交量的 3 倍
 # 3. 大涨：今日涨幅 > 6%
-result = []
-for symbol, st_code in stocks:
-    # 排除科创板(688)
-    if symbol.startswith('688'):
-        continue
-    table = '`gp%s`' % symbol
-    try:
-        cursor.execute('''SELECT trade_date, openp, high, low, closep, pct_chg, vol
-                         FROM %s WHERE trade_date IN (%%s, %%s) ORDER BY trade_date''' % table, (prev_day, today))
-        rows = cursor.fetchall()
-
-        if len(rows) == 2:
-            prev_data = rows[0]
-            today_data = rows[1]
-
-            prev_high = prev_data[2]
-            prev_close = prev_data[4]
-            prev_vol = prev_data[6]
-
-            today_low = today_data[3]
-            today_close = today_data[4]
-            today_pct_chg = today_data[5]
-            today_vol = today_data[6]
-
-            # 三个条件同时满足
-            has_gap = today_low > prev_high           # 跳空缺口
-            is_surge = prev_vol > 0 and today_vol >= prev_vol * 3  # 放量>=3倍
-            big_gain = today_pct_chg > 6              # 涨幅>6%
-
-            if has_gap and is_surge and big_gain:
-                vol_ratio = round(today_vol / prev_vol, 2)
-                gap_size = round(today_low - prev_high, 2)
-                result.append({
-                    'symbol': symbol,
-                    'st_code': st_code,
-                    'openp': today_data[1],
-                    'high': today_data[2],
-                    'low': today_data[3],
-                    'closep': today_close,
-                    'pct_chg': today_pct_chg,
-                    'vol': today_vol,
-                    'prev_vol': prev_vol,
-                    'vol_ratio': vol_ratio,
-                    'gap_size': gap_size,
-                    'prev_high': prev_high,
-                    'prev_close': prev_close
-                })
-    except Exception as e:
-        pass
+cursor.execute('''SELECT d.symbol, s.st_code, d.openp, d.high, d.low, d.closep,
+                         d.pct_chg, d.vol, p.vol, ROUND(d.vol / p.vol, 2),
+                         ROUND(d.low - p.high, 2), p.high, p.closep
+                  FROM st_daily d
+                  JOIN st_daily p ON p.ts_code = d.ts_code AND p.trade_date = %s
+                  JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date = %s AND d.symbol NOT LIKE '688%%'
+                    AND d.low > p.high AND p.vol > 0
+                    AND d.vol >= p.vol * 3 AND d.pct_chg > 6''', (prev_day, today))
+keys = ('symbol', 'st_code', 'openp', 'high', 'low', 'closep', 'pct_chg',
+        'vol', 'prev_vol', 'vol_ratio', 'gap_size', 'prev_high', 'prev_close')
+result = [dict(zip(keys, row)) for row in cursor.fetchall()]
 
 db.close()
 

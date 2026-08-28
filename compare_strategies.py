@@ -6,64 +6,39 @@ cursor = db.cursor()
 cursor.execute('SELECT symbol, st_code FROM stocks')
 stocks = cursor.fetchall()
 
-cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+cursor.execute('SELECT MAX(trade_date) FROM st_daily')
 latest_date = cursor.fetchone()[0]
 
-cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` ORDER BY trade_date DESC LIMIT 2')
+cursor.execute('SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 2')
 dates = cursor.fetchall()
 today = dates[0][0]
 prev_day = dates[1][0]
 
 # ---- 策略1: 放量涨幅 ----
-s1 = {}
-for symbol, st_code in stocks:
-    table = '`gp%s`' % symbol
-    try:
-        cursor.execute('SELECT trade_date, openp, high, low, closep, pct_chg, vol '
-                       'FROM %s WHERE trade_date IN (%%s, %%s) ORDER BY trade_date' % table, (prev_day, today))
-        rows = cursor.fetchall()
-        if len(rows) == 2:
-            prev_data, today_data = rows
-            pct_chg = today_data[5]
-            vol_today = today_data[6]
-            vol_prev = prev_data[6]
-            if vol_prev > 0 and vol_today >= vol_prev * 3 and pct_chg > 6 and not symbol.startswith('688'):
-                s1[symbol] = {
-                    'st_code': st_code, 'pct_chg': pct_chg,
-                    'vol_ratio': round(vol_today / vol_prev, 2),
-                    'vol_today': vol_today, 'vol_prev': vol_prev
-                }
-    except:
-        pass
+cursor.execute('''SELECT d.symbol, s.st_code, d.pct_chg, d.vol, p.vol
+                  FROM st_daily d
+                  JOIN st_daily p ON p.ts_code = d.ts_code AND p.trade_date = %s
+                  JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date = %s AND d.symbol NOT LIKE '688%%'
+                    AND p.vol > 0 AND d.vol >= p.vol * 3 AND d.pct_chg > 6''',
+               (prev_day, today))
+s1 = {symbol: {'st_code': st_code, 'pct_chg': pct_chg,
+               'vol_ratio': round(vol_today / vol_prev, 2),
+               'vol_today': vol_today, 'vol_prev': vol_prev}
+      for symbol, st_code, pct_chg, vol_today, vol_prev in cursor.fetchall()}
 
 # ---- 策略2: 向上跳空缺口 ----
-s2 = {}
-for symbol, st_code in stocks:
-    if symbol.startswith('688'):
-        continue
-    table = '`gp%s`' % symbol
-    try:
-        cursor.execute('SELECT trade_date, openp, high, low, closep, pct_chg, vol '
-                       'FROM %s WHERE trade_date IN (%%s, %%s) ORDER BY trade_date' % table, (prev_day, today))
-        rows = cursor.fetchall()
-        if len(rows) == 2:
-            prev_data, today_data = rows
-            prev_high = prev_data[2]
-            prev_close = prev_data[4]
-            prev_vol = prev_data[6]
-            today_low = today_data[3]
-            today_close = today_data[4]
-            today_pct_chg = today_data[5]
-            today_vol = today_data[6]
-            if today_low > prev_high and today_close > prev_close:
-                vol_ratio = round(today_vol / prev_vol, 2) if prev_vol > 0 else 0
-                s2[symbol] = {
-                    'st_code': st_code, 'pct_chg': today_pct_chg,
-                    'vol_ratio': vol_ratio, 'gap': round(today_low - prev_high, 2),
-                    'vol_today': today_vol, 'vol_prev': prev_vol
-                }
-    except:
-        pass
+cursor.execute('''SELECT d.symbol, s.st_code, d.pct_chg, d.vol, p.vol,
+                         ROUND(d.low - p.high, 2)
+                  FROM st_daily d
+                  JOIN st_daily p ON p.ts_code = d.ts_code AND p.trade_date = %s
+                  JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date = %s AND d.symbol NOT LIKE '688%%'
+                    AND d.low > p.high AND d.closep > p.closep''', (prev_day, today))
+s2 = {symbol: {'st_code': st_code, 'pct_chg': pct_chg,
+               'vol_ratio': round(vol_today / vol_prev, 2) if vol_prev > 0 else 0,
+               'gap': gap, 'vol_today': vol_today, 'vol_prev': vol_prev}
+      for symbol, st_code, pct_chg, vol_today, vol_prev, gap in cursor.fetchall()}
 
 db.close()
 

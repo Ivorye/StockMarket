@@ -45,11 +45,11 @@ def run_daily_update():
         logger.error(f"loadAllBasic 执行失败: {e}")
         return
 
-    # 步骤3：为新股票建表
-    logger.info("[3/6] 为新股票创建日线表 (createStockTable)...")
+    # 步骤3：确保统一日线表存在
+    logger.info("[3/6] 确保 st_daily 日线表存在...")
     try:
         ld.createStockTable(df)
-        logger.info("新股票建表完成")
+        logger.info("st_daily 表检查完成")
     except Exception as e:
         logger.error(f"createStockTable 执行失败: {e}")
         return
@@ -63,9 +63,8 @@ def run_daily_update():
         logger.error(f"日线数据加载失败: {e}")
         return
 
-    # 步骤5：汇总日线数据到st_daily表
-    # 步骤5：汇总日线数据到st_daily表（增量同步）
-    logger.info("[5/6] 汇总日线数据到st_daily表...")
+    # 步骤5：确认统一日线表可用（步骤4已直接写入）
+    logger.info("[5/6] 检查 st_daily 日线表...")
     try:
         sp.createDailyTable()
         sp.buildDailyTable()

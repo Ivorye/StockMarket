@@ -10,7 +10,7 @@ stocks = cursor.fetchall()
 print(f'共 {len(stocks)} 只股票')
 
 # 找到最新的交易日期
-cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+cursor.execute('SELECT MAX(trade_date) FROM st_daily')
 latest_date = cursor.fetchone()[0]
 print(f'最新交易日期: {latest_date}')
 
@@ -23,60 +23,22 @@ multiple = 1.0  # 涨幅1倍 = 翻倍
 print(f'筛选区间: {startDate} - {endDate}')
 print(f'条件: 期间涨幅 >= {multiple * 100}%')
 
+cursor.execute('''SELECT d.symbol, s.st_code,
+                         MAX(CASE WHEN d.trade_date = %s THEN d.closep END),
+                         MAX(CASE WHEN d.trade_date = %s THEN d.closep END)
+                  FROM st_daily d JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date IN (%s, %s) AND d.symbol NOT LIKE '688%%'
+                  GROUP BY d.symbol, s.st_code
+                  HAVING COUNT(DISTINCT d.trade_date) = 2''',
+               (startDate, endDate, startDate, endDate))
 result = []
-for symbol, st_code in stocks:
-    # 排除科创板(688)
-    if symbol.startswith('688'):
-        continue
-    table = '`gp%s`' % symbol
-    try:
-        # 查询起始日和结束日的收盘价
-        cursor.execute('''SELECT trade_date, closep FROM %s 
-                         WHERE trade_date IN (%s, %s) 
-                         ORDER BY trade_date''' % (table, '%s', '%s'), (startDate, endDate))
-        rows = cursor.fetchall()
-        
-        if len(rows) == 2:
-            start_price = rows[0][1]
-            end_price = rows[1][1]
-            
-            if start_price > 0:
-                gain = (end_price - start_price) / start_price
-                if gain >= multiple:
-                    result.append({
-                        'symbol': symbol,
-                        'st_code': st_code,
-                        'start_price': start_price,
-                        'end_price': end_price,
-                        'gain_pct': round(gain * 100, 2)
-                    })
-    except Exception as e:
-        # 如果精确日期没有数据，尝试找最近的交易日
-        try:
-            cursor.execute('''SELECT trade_date, closep FROM %s 
-                             WHERE trade_date >= %s ORDER BY trade_date ASC LIMIT 1''' % table, (startDate,))
-            row_start = cursor.fetchone()
-            
-            cursor.execute('''SELECT trade_date, closep FROM %s 
-                             WHERE trade_date <= %s ORDER BY trade_date DESC LIMIT 1''' % table, (endDate,))
-            row_end = cursor.fetchone()
-            
-            if row_start and row_end:
-                start_price = row_start[1]
-                end_price = row_end[1]
-                
-                if start_price > 0:
-                    gain = (end_price - start_price) / start_price
-                    if gain >= multiple:
-                        result.append({
-                            'symbol': symbol,
-                            'st_code': st_code,
-                            'start_price': start_price,
-                            'end_price': end_price,
-                            'gain_pct': round(gain * 100, 2)
-                        })
-        except:
-            pass
+for symbol, st_code, start_price, end_price in cursor.fetchall():
+    start_price, end_price = float(start_price), float(end_price)
+    if start_price > 0:
+        gain = (end_price - start_price) / start_price
+        if gain >= multiple:
+            result.append(dict(symbol=symbol, st_code=st_code, start_price=start_price,
+                               end_price=end_price, gain_pct=round(gain * 100, 2)))
 
 db.close()
 

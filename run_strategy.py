@@ -10,12 +10,12 @@ stocks = cursor.fetchall()
 print(f'共 {len(stocks)} 只股票')
 
 # 找到最新的交易日期
-cursor.execute('SELECT MAX(trade_date) FROM `gp000001`')
+cursor.execute('SELECT MAX(trade_date) FROM st_daily')
 latest_date = cursor.fetchone()[0]
 print(f'最新交易日期: {latest_date}')
 
 # 获取前一个交易日
-cursor.execute('SELECT DISTINCT trade_date FROM `gp000001` ORDER BY trade_date DESC LIMIT 2')
+cursor.execute('SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT 2')
 dates = cursor.fetchall()
 if len(dates) < 2:
     print('交易数据不足')
@@ -27,35 +27,17 @@ prev_day = dates[1][0]
 print(f'筛选日期: {today} vs {prev_day}')
 
 # 开始筛选
-result = []
-for symbol, st_code in stocks:
-    table = '`gp%s`' % symbol
-    try:
-        # 查询今天和前天的数据
-        cursor.execute('SELECT trade_date, openp, high, low, closep, pct_chg, vol FROM %s WHERE trade_date IN (%%s, %%s) ORDER BY trade_date' % table, (prev_day, today))
-        rows = cursor.fetchall()
-        
-        if len(rows) == 2:
-            prev_data = rows[0]
-            today_data = rows[1]
-            
-            pct_chg = today_data[5]
-            vol_today = today_data[6]
-            vol_prev = prev_data[6]
-            
-            # 放量>=3倍 且 涨幅>6%
-            if vol_prev > 0 and vol_today >= vol_prev * 3 and pct_chg > 6:
-                # 排除科创板(688)、ST、*ST
-                if symbol.startswith('688'):
-                    continue
-                result.append({
-                    'symbol': symbol,
-                    'st_code': st_code,
-                    'pct_chg': pct_chg,
-                    'vol_ratio': round(vol_today / vol_prev, 2)
-                })
-    except Exception as e:
-        pass  # 跳过异常
+cursor.execute('''SELECT d.symbol, s.st_code, d.pct_chg,
+                         ROUND(d.vol / p.vol, 2) AS vol_ratio
+                  FROM st_daily d
+                  JOIN st_daily p ON p.ts_code = d.ts_code AND p.trade_date = %s
+                  JOIN stocks s ON s.st_code = d.ts_code
+                  WHERE d.trade_date = %s
+                    AND d.symbol NOT LIKE '688%%'
+                    AND p.vol > 0 AND d.vol >= p.vol * 3 AND d.pct_chg > 6''',
+               (prev_day, today))
+result = [dict(symbol=row[0], st_code=row[1], pct_chg=row[2], vol_ratio=row[3])
+          for row in cursor.fetchall()]
 
 db.close()
 

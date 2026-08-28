@@ -20,16 +20,15 @@ for k, (symbol, st_code) in enumerate(rows):
         if data is None or len(data) == 0:
             skipped += 1
             continue
-        table = '`gp%s`' % symbol
         for i in range(len(data)):
-            sql0 = "SELECT trade_date FROM %s WHERE trade_date=%%s" % table
-            sql = ("INSERT INTO %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) "
-                   "VALUES(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)" % table)
-            result = cursor.execute(sql0, (data.iloc[i].trade_date,))
+            sql0 = "SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date=%s"
+            sql = ("INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) "
+                   "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+            result = cursor.execute(sql0, (st_code,data.iloc[i].trade_date))
             if result == 0:
                 try:
                     cursor.execute(sql, (
-                        data.iloc[i].trade_date,
+                        st_code,symbol,data.iloc[i].trade_date,
                         float(data.iloc[i].open),
                         float(data.iloc[i].high),
                         float(data.iloc[i].low),
@@ -57,16 +56,15 @@ for k, (symbol, st_code) in enumerate(rows):
             try:
                 data = pro.daily(ts_code=st_code, start_date='20260815', end_date='20260817')
                 if data is not None and len(data) > 0:
-                    table = '`gp%s`' % symbol
                     for i in range(len(data)):
-                        sql0 = "SELECT trade_date FROM %s WHERE trade_date=%%s" % table
-                        sql = ("INSERT INTO %s(trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) "
-                               "VALUES(%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s,%%s)" % table)
-                        result = cursor.execute(sql0, (data.iloc[i].trade_date,))
+                        sql0 = "SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date=%s"
+                        sql = ("INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) "
+                               "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+                        result = cursor.execute(sql0, (st_code,data.iloc[i].trade_date))
                         if result == 0:
                             try:
                                 cursor.execute(sql, (
-                                    data.iloc[i].trade_date,
+                                    st_code,symbol,data.iloc[i].trade_date,
                                     float(data.iloc[i].open), float(data.iloc[i].high),
                                     float(data.iloc[i].low), float(data.iloc[i].close),
                                     float(data.iloc[i].pre_close), float(data.iloc[i].change),
