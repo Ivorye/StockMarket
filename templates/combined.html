@@ -42,6 +42,34 @@
         .code { font-family: "Cascadia Code", "Consolas", monospace; }
         .code a { color: #1677ff; text-decoration: none; }
         .code a:hover { text-decoration: underline; }
+        .kline-trigger { margin-left: 8px; padding: 3px 7px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 12px; }
+        .kline-trigger:hover { color: #1677ff; border-color: #1677ff; }
+        .kline-trigger:focus-visible, .chart-close:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+        .chart-overlay { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.38); align-items: flex-end; justify-content: center; }
+        .chart-overlay.open { display: flex; }
+        .chart-drawer { width: min(1120px, 100%); background: #fff; border-radius: 8px 8px 0 0; padding: 18px 20px 20px; box-shadow: 0 -8px 32px rgba(0,0,0,.16); }
+        .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .chart-actions { display: flex; align-items: center; gap: 8px; }
+        .chart-title { font-size: 16px; font-weight: 600; }
+        .chart-meta { margin-left: 10px; color: #888; font-size: 12px; font-weight: 400; }
+        .chart-latest { min-height: 36px; padding: 0 12px; border: 1px solid #1677ff; border-radius: 4px; background: #fff; color: #1677ff; cursor: pointer; font-size: 13px; }
+        .chart-latest:hover { background: #e6f4ff; }
+        .chart-latest:disabled { border-color: #d9d9d9; color: #aaa; background: #fafafa; cursor: wait; }
+        .chart-range { display: inline-flex; align-items: center; border: 1px solid #d9d9d9; border-radius: 4px; overflow: hidden; }
+        .chart-range button { width: 36px; height: 34px; border: 0; background: #fff; color: #555; cursor: pointer; font-size: 20px; line-height: 1; }
+        .chart-range button:hover { background: #f0f5ff; color: #1677ff; }
+        .chart-range button:disabled { color: #bbb; background: #fafafa; cursor: not-allowed; }
+        .chart-range span { min-width: 62px; text-align: center; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
+        .chart-close { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #666; cursor: pointer; font-size: 24px; }
+        .chart-stage { position: relative; height: 480px; border: 1px solid #eee; background: #fff; }
+        #kline-canvas { width: 100%; height: 100%; display: block; }
+        .chart-status { position: absolute; inset: 0; display: grid; place-items: center; color: #888; background: rgba(255,255,255,.92); }
+        .kline-preview { display: none; position: fixed; z-index: 1100; width: 430px; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.18); pointer-events: none; }
+        .kline-preview.open { display: block; }
+        .preview-title { margin-bottom: 6px; color: #333; font-size: 12px; font-weight: 600; }
+        .preview-stage { position: relative; height: 220px; }
+        #kline-preview-canvas { width: 100%; height: 100%; display: block; }
+        .preview-status { position: absolute; inset: 0; display: grid; place-items: center; color: #888; background: #fff; font-size: 12px; }
         .cache-hint { font-size: 12px; color: #bbb; margin-left: 12px; }
 
         .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
@@ -80,6 +108,8 @@
             .tab { flex: 0 0 auto; padding: 10px 14px; min-height: 44px; }
             .panel { overflow-x: auto; }
             .table-scroll { min-width: 820px; }
+            .chart-stage { height: 360px; }
+            .kline-preview { display: none !important; }
         }
     </style>
 </head>
@@ -147,7 +177,7 @@
                 <th>起始价</th><th>最新价</th></tr></thead>
             <tbody>{% for r in data.smooth %}<tr>
                 <td>{{ loop.index }}</td>
-                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a></td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
                 <td>{{ r.name }}</td>
                 <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
@@ -183,7 +213,7 @@
                 {% for r in data.combined %}
                 <tr>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -244,7 +274,7 @@
                 {% for r in data.s2 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -304,7 +334,7 @@
                 {% for r in data.s1 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -342,6 +372,17 @@
     </div>
 </div>
 
+<div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" onclick="if(event.target===this)closeKline()">
+    <section class="chart-drawer">
+        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-range" aria-label="调整 K 线交易日范围"><button id="range-more" onclick="changeKlineRange(60)" aria-label="增加60个交易日">−</button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="减少60个交易日">+</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+        <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
+    </section>
+</div>
+<div class="kline-preview" id="kline-preview" aria-hidden="true">
+    <div class="preview-title" id="preview-title">K线预览</div>
+    <div class="preview-stage"><canvas id="kline-preview-canvas"></canvas><div class="preview-status" id="preview-status">正在加载…</div></div>
+</div>
+
 <script>
 function switchTab(event, name) {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -363,6 +404,132 @@ function sortSmooth(column) {
     });
     rows.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
 }
+const overlay = document.getElementById('chart-overlay');
+const statusEl = document.getElementById('chart-status');
+const canvas = document.getElementById('kline-canvas');
+const preview = document.getElementById('kline-preview');
+const previewCanvas = document.getElementById('kline-preview-canvas');
+const previewStatus = document.getElementById('preview-status');
+let lastChartButton = null;
+let currentChartItems = [];
+let currentChartCode = '';
+let currentChartDays = 120;
+let currentChartLatest = false;
+let previewTimer = null;
+let previewRequest = null;
+const klineCache = new Map();
+async function openKline(code) {
+    currentChartCode = code;
+    currentChartDays = 120;
+    currentChartLatest = false;
+    updateRangeControls();
+    lastChartButton = document.activeElement;
+    overlay.classList.add('open'); statusEl.style.display = 'grid'; statusEl.textContent = '正在加载行情…';
+    document.getElementById('chart-title').textContent = code + ' K线';
+    document.getElementById('chart-meta').textContent = '最近120个交易日';
+    try {
+        const data = await fetchKline(code, null, currentChartDays, '{{ data.today }}');
+        if (!data.items.length) throw new Error('该日期前没有可显示的日线数据');
+        document.getElementById('chart-title').textContent = `${code} ${data.name || ''}`;
+        currentChartItems = data.items;
+        statusEl.style.display = 'none'; drawKline(currentChartItems);
+    } catch (error) { statusEl.textContent = error.message; }
+}
+async function showLatestKline() {
+    if (!currentChartCode) return;
+    const button = document.getElementById('chart-latest');
+    button.disabled = true; statusEl.style.display = 'grid'; statusEl.textContent = '正在加载最新行情…';
+    try {
+        const response = await fetch(`/api/kline/${encodeURIComponent(currentChartCode)}?days=${currentChartDays}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '行情请求失败');
+        if (!data.items.length) throw new Error('没有可显示的日线数据');
+        currentChartItems = data.items;
+        currentChartLatest = true;
+        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日 · 更新至 ${data.items[data.items.length - 1].date}`;
+        statusEl.style.display = 'none'; drawKline(currentChartItems);
+    } catch (error) { statusEl.textContent = error.message; }
+    finally { button.disabled = false; }
+}
+async function changeKlineRange(delta) {
+    const nextDays = Math.max(60, Math.min(240, currentChartDays + delta));
+    if (nextDays === currentChartDays || !currentChartCode) return;
+    currentChartDays = nextDays; updateRangeControls();
+    statusEl.style.display = 'grid'; statusEl.textContent = `正在加载${currentChartDays}个交易日…`;
+    try {
+        const endDate = currentChartLatest ? '' : '{{ data.today }}';
+        const data = await fetchKline(currentChartCode, null, currentChartDays, endDate);
+        if (!data.items.length) throw new Error('没有可显示的日线数据');
+        currentChartItems = data.items;
+        const suffix = currentChartLatest ? ` · 更新至 ${data.items[data.items.length - 1].date}` : '';
+        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日${suffix}`;
+        statusEl.style.display = 'none'; drawKline(currentChartItems);
+    } catch (error) { statusEl.textContent = error.message; }
+}
+function updateRangeControls() {
+    document.getElementById('range-label').textContent = currentChartDays + '日';
+    document.getElementById('range-more').disabled = currentChartDays >= 240;
+    document.getElementById('range-less').disabled = currentChartDays <= 60;
+}
+function closeKline() { overlay.classList.remove('open'); if (lastChartButton) lastChartButton.focus(); }
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay.classList.contains('open')) closeKline(); });
+async function fetchKline(code, signal, days = 120, endDate = '{{ data.today }}') {
+    const cacheKey = `${code}|${days}|${endDate || 'latest'}`;
+    if (klineCache.has(cacheKey)) return klineCache.get(cacheKey);
+    const endParam = endDate ? `&end_date=${encodeURIComponent(endDate)}` : '';
+    const response = await fetch(`/api/kline/${encodeURIComponent(code)}?days=${days}${endParam}`, {signal});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '行情请求失败');
+    klineCache.set(cacheKey, data);
+    return data;
+}
+function positionPreview(button) {
+    const rect = button.getBoundingClientRect(), width = 430, height = 258, gap = 8;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+    const top = rect.bottom + height + gap <= window.innerHeight ? rect.bottom + gap : rect.top - height - gap;
+    preview.style.left = left + 'px'; preview.style.top = Math.max(8, top) + 'px';
+}
+function schedulePreview(button) {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => showPreview(button), 180);
+}
+async function showPreview(button) {
+    const code = button.dataset.code;
+    previewRequest?.abort(); previewRequest = new AbortController();
+    positionPreview(button); preview.classList.add('open'); preview.setAttribute('aria-hidden', 'false');
+    document.getElementById('preview-title').textContent = code + ' · 最近120个交易日';
+    previewStatus.style.display = 'grid'; previewStatus.textContent = '正在加载…';
+    try {
+        const data = await fetchKline(code, previewRequest.signal);
+        previewStatus.style.display = 'none'; drawKline(data.items, previewCanvas);
+    } catch (error) { if (error.name !== 'AbortError') previewStatus.textContent = error.message; }
+}
+function hidePreview() {
+    clearTimeout(previewTimer); previewRequest?.abort(); previewRequest = null;
+    preview.classList.remove('open'); preview.setAttribute('aria-hidden', 'true');
+}
+document.querySelectorAll('.kline-trigger').forEach(button => {
+    button.addEventListener('mouseenter', () => schedulePreview(button));
+    button.addEventListener('mouseleave', hidePreview);
+    button.addEventListener('focus', () => schedulePreview(button));
+    button.addEventListener('blur', hidePreview);
+    button.addEventListener('click', hidePreview);
+});
+function drawKline(items, targetCanvas = canvas) {
+    const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
+    targetCanvas.width = rect.width * dpr; targetCanvas.height = rect.height * dpr;
+    const ctx = targetCanvas.getContext('2d'); ctx.scale(dpr, dpr);
+    const w=rect.width,h=rect.height,left=58,right=18,top=18,priceBottom=h*.72,volTop=h*.78,bottom=h-28;
+    const highs=items.map(x=>x.high), lows=items.map(x=>x.low), vols=items.map(x=>x.volume);
+    const maxP=Math.max(...highs), minP=Math.min(...lows), maxV=Math.max(...vols), range=maxP-minP||1;
+    const y=p=>top+(maxP-p)/range*(priceBottom-top), step=(w-left-right)/items.length, body=Math.max(2,Math.min(9,step*.58));
+    ctx.font='11px Cascadia Code, Consolas, monospace'; ctx.strokeStyle='#edf0f2'; ctx.fillStyle='#888'; ctx.lineWidth=1;
+    for(let i=0;i<=4;i++){const yy=top+(priceBottom-top)*i/4;ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(w-right,yy);ctx.stroke();ctx.fillText((maxP-range*i/4).toFixed(2),4,yy+4);}
+    items.forEach((d,i)=>{const x=left+step*(i+.5),up=d.close>=d.open,color=up?'#cf1322':'#389e0d';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(d.high));ctx.lineTo(x,y(d.low));ctx.stroke();const yo=y(Math.max(d.open,d.close)),bh=Math.max(1,Math.abs(y(d.open)-y(d.close)));ctx.fillRect(x-body/2,yo,body,bh);const vh=(d.volume/maxV)*(bottom-volTop);ctx.globalAlpha=.48;ctx.fillRect(x-body/2,bottom-vh,body,vh);ctx.globalAlpha=1;});
+    ctx.fillStyle='#888'; const labels=[0,Math.floor((items.length-1)/2),items.length-1]; labels.forEach(i=>{const x=left+step*(i+.5);ctx.fillText(items[i].date.slice(4,6)+'-'+items[i].date.slice(6,8),x-15,h-8);});
+    ctx.fillText('成交量',4,volTop+10);
+}
+window.addEventListener('resize', () => { if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
 </script>
 </body>
 </html>

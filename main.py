@@ -1,9 +1,10 @@
 import time
 import os
 import csv
+import re
 import pymysql
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="StockMarket 筛选系统")
@@ -214,3 +215,36 @@ async def combined_page(request: Request, date: str = ''):
         "data": data,
         "date": date or data['today'],
     })
+
+
+@app.get("/api/kline/{st_code}", tags=["data"])
+async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
+    """返回指定股票的 K 線與成交量資料。"""
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code):
+        return JSONResponse({"error": "股票代碼格式不正確"}, status_code=400)
+    days = max(20, min(days, 240))
+    db = _connect_db()
+    try:
+        cursor = db.cursor()
+        cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (_DB_TIMEOUT_SECONDS * 1000,))
+        date_filter = "AND d.trade_date<=%s" if end_date else ""
+        params = (st_code, end_date, days) if end_date else (st_code, days)
+        cursor.execute(
+            "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,"
+            "COALESCE(s.fullname,'') FROM st_daily d "
+            "LEFT JOIN stocks s ON s.st_code=d.ts_code "
+            f"WHERE d.ts_code=%s {date_filter} "
+            "ORDER BY d.trade_date DESC LIMIT %s", params)
+        rows = cursor.fetchall()[::-1]
+    finally:
+        db.close()
+    return {
+        "st_code": st_code,
+        "name": rows[0][6] if rows else "",
+        "items": [
+            {"date": r[0], "open": r[1], "high": r[2], "low": r[3],
+             "close": r[4], "volume": r[5]}
+            for r in rows
+        ],
+    }
