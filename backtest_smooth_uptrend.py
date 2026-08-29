@@ -11,6 +11,7 @@ import math
 import os
 import statistics
 import time
+import uuid
 from collections import defaultdict
 
 import pymysql
@@ -32,6 +33,7 @@ def parse_args():
     parser.add_argument("--max-drawdown", type=float, default=10)
     parser.add_argument("--horizons", default="5,10,20,60", help="持有交易日，以逗號分隔")
     parser.add_argument("--output-dir", default="output/backtest_smooth_uptrend")
+    parser.add_argument("--no-db", action="store_true", help="只輸出 CSV，不寫入回測表")
     return parser.parse_args()
 
 
@@ -40,6 +42,44 @@ def connect_db():
         host="localhost", user="root", password="P@ssw0rd", database="stockshare",
         connect_timeout=10, read_timeout=120, write_timeout=30,
     )
+
+
+def create_backtest_tables(conn):
+    cursor = conn.cursor()
+    cursor.execute("""CREATE TABLE IF NOT EXISTS st_backtest_run (
+        run_id VARCHAR(36) PRIMARY KEY, strategy VARCHAR(64) NOT NULL,
+        start_date VARCHAR(8) NOT NULL, end_date VARCHAR(8) NOT NULL,
+        window_days INT NOT NULL, horizons VARCHAR(32) NOT NULL,
+        min_gain_pct DOUBLE NOT NULL, min_r_squared DOUBLE NOT NULL,
+        min_up_ratio DOUBLE NOT NULL, max_drawdown_pct DOUBLE NOT NULL,
+        status VARCHAR(16) NOT NULL, trade_count INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP NULL, INDEX idx_strategy_created(strategy,created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS st_backtest_trade (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY, run_id VARCHAR(36) NOT NULL,
+        ts_code VARCHAR(12) NOT NULL, signal_date VARCHAR(8) NOT NULL,
+        entry_date VARCHAR(8) NOT NULL, entry_open DOUBLE NOT NULL,
+        horizon INT NOT NULL, exit_date VARCHAR(8) NOT NULL, exit_close DOUBLE NOT NULL,
+        return_pct DOUBLE NOT NULL, mfe_pct DOUBLE NOT NULL, mae_pct DOUBLE NOT NULL,
+        signal_gain_pct DOUBLE NOT NULL, signal_r_squared DOUBLE NOT NULL,
+        signal_up_ratio DOUBLE NOT NULL, signal_max_drawdown_pct DOUBLE NOT NULL,
+        UNIQUE KEY uk_run_signal_horizon(run_id,ts_code,signal_date,horizon),
+        INDEX idx_run_horizon(run_id,horizon),
+        CONSTRAINT fk_backtest_trade_run FOREIGN KEY(run_id) REFERENCES st_backtest_run(run_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS st_backtest_summary (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY, run_id VARCHAR(36) NOT NULL,
+        period_type VARCHAR(16) NOT NULL, period_value VARCHAR(16) NOT NULL,
+        horizon INT NOT NULL, signals INT NOT NULL, win_rate_pct DOUBLE NOT NULL,
+        avg_return_pct DOUBLE NOT NULL, median_return_pct DOUBLE NOT NULL,
+        p25_return_pct DOUBLE NOT NULL, p75_return_pct DOUBLE NOT NULL,
+        avg_mfe_pct DOUBLE NOT NULL, median_mfe_pct DOUBLE NOT NULL,
+        avg_mae_pct DOUBLE NOT NULL, median_mae_pct DOUBLE NOT NULL,
+        UNIQUE KEY uk_run_period_horizon(run_id,period_type,period_value,horizon),
+        CONSTRAINT fk_backtest_summary_run FOREIGN KEY(run_id) REFERENCES st_backtest_run(run_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    conn.commit()
 
 
 def offset_date(date_text, calendar_days):
@@ -166,6 +206,48 @@ def write_csv(path, rows):
         writer.writerows(rows)
 
 
+def save_backtest_to_db(args, horizons, trades, summary):
+    conn = connect_db()
+    run_id = str(uuid.uuid4())
+    try:
+        create_backtest_tables(conn)
+        cursor = conn.cursor()
+        end_date = args.end or max((row["signal_date"] for row in trades), default=args.start)
+        cursor.execute("""INSERT INTO st_backtest_run
+            (run_id,strategy,start_date,end_date,window_days,horizons,min_gain_pct,
+             min_r_squared,min_up_ratio,max_drawdown_pct,status)
+            VALUES(%s,'smooth_uptrend',%s,%s,%s,%s,%s,%s,%s,%s,'running')""",
+            (run_id,args.start,end_date,args.window,','.join(map(str,horizons)),args.min_gain,
+             args.min_r2,args.min_up_ratio,args.max_drawdown))
+        trade_sql = """INSERT INTO st_backtest_trade
+            (run_id,ts_code,signal_date,entry_date,entry_open,horizon,exit_date,exit_close,
+             return_pct,mfe_pct,mae_pct,signal_gain_pct,signal_r_squared,signal_up_ratio,
+             signal_max_drawdown_pct) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+        values = [(run_id,row['ts_code'],row['signal_date'],row['entry_date'],row['entry_open'],
+                   row['horizon'],row['exit_date'],row['exit_close'],row['return_pct'],
+                   row['mfe_pct'],row['mae_pct'],row['signal_gain_pct'],row['signal_r_squared'],
+                   row['signal_up_ratio'],row['signal_max_drawdown_pct']) for row in trades]
+        for index in range(0, len(values), 1000):
+            cursor.executemany(trade_sql, values[index:index + 1000])
+            conn.commit()
+        summary_sql = """INSERT INTO st_backtest_summary
+            (run_id,period_type,period_value,horizon,signals,win_rate_pct,avg_return_pct,
+             median_return_pct,p25_return_pct,p75_return_pct,avg_mfe_pct,median_mfe_pct,
+             avg_mae_pct,median_mae_pct) VALUES(%s,'all','all',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+        cursor.executemany(summary_sql, [(run_id,row['horizon'],row['signals'],row['win_rate_pct'],
+            row['avg_return_pct'],row['median_return_pct'],row['p25_return_pct'],row['p75_return_pct'],
+            row['avg_mfe_pct'],row['median_mfe_pct'],row['avg_mae_pct'],row['median_mae_pct']) for row in summary])
+        cursor.execute("UPDATE st_backtest_run SET status='completed',trade_count=%s,completed_at=NOW() WHERE run_id=%s",
+                       (len(trades),run_id))
+        conn.commit()
+        return run_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def main():
     args = parse_args()
     horizons = tuple(sorted({int(value) for value in args.horizons.split(",") if int(value) > 0}))
@@ -177,6 +259,7 @@ def main():
     summary = summarize(trades, horizons)
     write_csv(os.path.join(args.output_dir, "trades.csv"), trades)
     write_csv(os.path.join(args.output_dir, "summary.csv"), summary)
+    run_id = None if args.no_db else save_backtest_to_db(args, horizons, trades, summary)
     print("無前視回測完成（訊號收盤後產生，下一交易日開盤進場）")
     print("注意：資料庫缺少歷史 ST／退市狀態，無法完全消除存活者偏差。")
     for row in summary:
@@ -186,6 +269,8 @@ def main():
             f"MFE中位 {row['median_mfe_pct']:.2f}% | MAE中位 {row['median_mae_pct']:.2f}%"
         )
     print(f"輸出: {args.output_dir} | 耗時 {time.perf_counter() - started:.2f} 秒")
+    if run_id:
+        print(f"資料庫回測批次: {run_id}")
 
 
 if __name__ == "__main__":

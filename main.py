@@ -52,6 +52,25 @@ def _load_backtest_results():
     yearly_path = os.path.join(base_dir, 'yearly_summary.csv')
     result = {'available': False, 'summary': [], 'yearly': [],
               'signal_count': 0, 'conclusion': ''}
+    try:
+        db = _connect_db()
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SELECT run_id FROM st_backtest_run WHERE strategy='smooth_uptrend' AND status='completed' ORDER BY completed_at DESC LIMIT 1")
+        latest = cursor.fetchone()
+        if latest:
+            cursor.execute("SELECT * FROM st_backtest_summary WHERE run_id=%s AND period_type='all' ORDER BY horizon", (latest['run_id'],))
+            result['summary'] = cursor.fetchall()
+            cursor.execute("SELECT * FROM st_backtest_summary WHERE run_id=%s AND period_type='year' ORDER BY period_value,horizon", (latest['run_id'],))
+            result['yearly'] = cursor.fetchall()
+            result['available'] = bool(result['summary'])
+            result['signal_count'] = result['summary'][0]['signals'] if result['summary'] else 0
+            result['conclusion'] = ('各持有期勝率均低於50%，且中位報酬為負；平均報酬受到少數大漲樣本拉高，'
+                                    '目前不適合單獨作為買入訊號。')
+            db.close()
+            return result
+        db.close()
+    except Exception:
+        pass
     if not os.path.exists(summary_path):
         return result
     numeric_fields = {'horizon', 'signals', 'win_rate_pct', 'avg_return_pct',
