@@ -44,7 +44,9 @@
         .code a:hover { text-decoration: underline; }
         .kline-trigger { margin-left: 8px; padding: 3px 7px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 12px; }
         .kline-trigger:hover { color: #1677ff; border-color: #1677ff; }
-        .kline-trigger:focus-visible, .chart-close:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+        .kline-preview-trigger { margin-left: 4px; padding: 3px 7px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fafafa; color: #666; cursor: pointer; font-size: 12px; }
+        .kline-preview-trigger:hover { color: #1677ff; border-color: #1677ff; background: #f0f5ff; }
+        .kline-trigger:focus-visible, .kline-preview-trigger:focus-visible, .chart-close:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
         .chart-overlay { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.38); align-items: flex-end; justify-content: center; }
         .chart-overlay.open { display: flex; }
         .chart-drawer { width: min(1120px, 100%); background: #fff; border-radius: 8px 8px 0 0; padding: 18px 20px 20px; box-shadow: 0 -8px 32px rgba(0,0,0,.16); }
@@ -57,6 +59,7 @@
         .chart-latest:disabled { border-color: #d9d9d9; color: #aaa; background: #fafafa; cursor: wait; }
         .chart-range { display: inline-flex; align-items: center; border: 1px solid #d9d9d9; border-radius: 4px; overflow: hidden; }
         .chart-range button { width: 36px; height: 34px; border: 0; background: #fff; color: #555; cursor: pointer; font-size: 20px; line-height: 1; }
+        .chart-range button svg { width: 18px; height: 18px; display: block; margin: auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
         .chart-range button:hover { background: #f0f5ff; color: #1677ff; }
         .chart-range button:disabled { color: #bbb; background: #fafafa; cursor: not-allowed; }
         .chart-range span { min-width: 62px; text-align: center; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -105,6 +108,12 @@
         .sortable { cursor: pointer; user-select: none; }
         .sortable:hover { color: #1677ff; }
         .sortable:focus-visible { outline: 2px solid #1677ff; outline-offset: -2px; }
+        .help-wrap { position: relative; display: inline-flex; align-items: center; margin-left: 4px; vertical-align: middle; }
+        .help-icon { width: 18px; height: 18px; border: 1px solid #8c8c8c; border-radius: 50%; background: #fff; color: #666; cursor: help; font: 600 12px/16px -apple-system, "Microsoft YaHei", sans-serif; text-align: center; }
+        .help-icon:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
+        .help-tooltip { visibility: hidden; opacity: 0; position: absolute; z-index: 20; left: 50%; top: calc(100% + 8px); width: 300px; padding: 10px 12px; transform: translateX(-50%); border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.14); color: #333; font-size: 12px; font-weight: 400; line-height: 1.6; white-space: normal; pointer-events: none; transition: opacity .12s ease; }
+        .help-tooltip strong { font-weight: 600; }
+        .help-wrap:hover .help-tooltip, .help-wrap:focus-within .help-tooltip { visibility: visible; opacity: 1; }
         @media (max-width: 720px) {
             .container { padding: 16px 12px; }
             .controls, .legend { align-items: flex-start; flex-direction: column; }
@@ -176,12 +185,12 @@
             <thead><tr><th>#</th><th>股票</th><th>名称</th>
                 <th class="sortable" tabindex="0" onclick="sortSmooth(3)" onkeydown="if(event.key==='Enter')sortSmooth(3)">30日涨幅 ↕</th>
                 <th class="sortable" tabindex="0" onclick="sortSmooth(4)" onkeydown="if(event.key==='Enter')sortSmooth(4)">最大回撤 ↕</th>
-                <th class="sortable" tabindex="0" onclick="sortSmooth(5)" onkeydown="if(event.key==='Enter')sortSmooth(5)">R² ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(5)" onkeydown="if(event.key==='Enter')sortSmooth(5)">R² ↕<span class="help-wrap" onclick="event.stopPropagation()"><button class="help-icon" type="button" aria-describedby="r2-help" aria-label="查看 R 平方说明">?</button><span class="help-tooltip" id="r2-help" role="tooltip"><strong>R²（决定系数）</strong><br>衡量30日收盘价与直线上升趋势的吻合程度，范围为0～1。越接近1，走势越平稳一致；越接近0，波动越杂乱。<br><strong>当前判断标准：</strong>R²≥0.8 才会入选；它不代表未来一定上涨。</span></span></th>
                 <th class="sortable" tabindex="0" onclick="sortSmooth(6)" onkeydown="if(event.key==='Enter')sortSmooth(6)">上涨日占比 ↕</th>
                 <th>起始价</th><th>最新价</th></tr></thead>
             <tbody>{% for r in data.smooth %}<tr>
                 <td>{{ loop.index }}</td>
-                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                 <td>{{ r.name }}</td>
                 <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
@@ -217,7 +226,7 @@
                 {% for r in data.combined %}
                 <tr>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -278,7 +287,7 @@
                 {% for r in data.s2 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -338,7 +347,7 @@
                 {% for r in data.s1 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}')">K线</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -378,7 +387,7 @@
 
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
-        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线交易日范围"><button id="range-more" onclick="changeKlineRange(60)" aria-label="增加60个交易日">−</button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="减少60个交易日">+</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
         <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
     </section>
 </div>
@@ -539,12 +548,11 @@ function hidePreview() {
     clearTimeout(previewTimer); previewRequest?.abort(); previewRequest = null;
     preview.classList.remove('open'); preview.setAttribute('aria-hidden', 'true');
 }
-document.querySelectorAll('.kline-trigger').forEach(button => {
+document.querySelectorAll('.kline-preview-trigger').forEach(button => {
     button.addEventListener('mouseenter', () => schedulePreview(button));
     button.addEventListener('mouseleave', hidePreview);
     button.addEventListener('focus', () => schedulePreview(button));
     button.addEventListener('blur', hidePreview);
-    button.addEventListener('click', hidePreview);
 });
 function drawKline(items, targetCanvas = canvas) {
     const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
