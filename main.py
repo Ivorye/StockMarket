@@ -44,6 +44,39 @@ def _eastmoney_url(st_code: str) -> str:
 templates.env.globals['eastmoney_url'] = _eastmoney_url
 
 
+def _load_backtest_results():
+    """載入完整回測彙總；檔案不存在時回傳可渲染的空狀態。"""
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            'output', 'backtest_smooth_uptrend_full')
+    summary_path = os.path.join(base_dir, 'summary.csv')
+    yearly_path = os.path.join(base_dir, 'yearly_summary.csv')
+    result = {'available': False, 'summary': [], 'yearly': [],
+              'signal_count': 0, 'conclusion': ''}
+    if not os.path.exists(summary_path):
+        return result
+    numeric_fields = {'horizon', 'signals', 'win_rate_pct', 'avg_return_pct',
+                      'median_return_pct', 'avg_mfe_pct', 'median_mfe_pct',
+                      'avg_mae_pct', 'median_mae_pct'}
+    with open(summary_path, newline='', encoding='utf-8-sig') as handle:
+        for row in csv.DictReader(handle):
+            for key in numeric_fields:
+                if key in row:
+                    row[key] = int(float(row[key])) if key in ('horizon', 'signals') else float(row[key])
+            result['summary'].append(row)
+    if os.path.exists(yearly_path):
+        with open(yearly_path, newline='', encoding='utf-8-sig') as handle:
+            for row in csv.DictReader(handle):
+                for key in numeric_fields:
+                    if key in row:
+                        row[key] = int(float(row[key])) if key in ('horizon', 'signals') else float(row[key])
+                result['yearly'].append(row)
+    result['available'] = bool(result['summary'])
+    result['signal_count'] = result['summary'][0]['signals'] if result['summary'] else 0
+    result['conclusion'] = ('各持有期勝率均低於50%，且中位報酬為負；平均報酬受到少數大漲樣本拉高，'
+                            '目前不適合單獨作為買入訊號。')
+    return result
+
+
 def _save_signals(rows, strategy, trade_date):
     """将策略筛选结果写入 st_daily_signal 表和 CSV 文件"""
     if not rows:
@@ -213,6 +246,7 @@ async def combined_page(request: Request, date: str = ''):
     return templates.TemplateResponse("combined.html", {
         "request": request,
         "data": data,
+        "backtest": _load_backtest_results(),
         "date": date or data['today'],
     })
 
