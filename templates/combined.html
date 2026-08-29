@@ -60,6 +60,10 @@
         .chart-range button:hover { background: #f0f5ff; color: #1677ff; }
         .chart-range button:disabled { color: #bbb; background: #fafafa; cursor: not-allowed; }
         .chart-range span { min-width: 62px; text-align: center; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; }
+        .chart-step { display: inline-flex; align-items: center; gap: 2px; }
+        .chart-step button { width: 36px; height: 36px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 18px; }
+        .chart-step button:hover { border-color: #1677ff; color: #1677ff; background: #f0f5ff; }
+        .chart-step button:disabled { border-color: #eee; color: #bbb; background: #fafafa; cursor: not-allowed; }
         .chart-close { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #666; cursor: pointer; font-size: 24px; }
         .chart-stage { position: relative; height: 480px; border: 1px solid #eee; background: #fff; }
         #kline-canvas { width: 100%; height: 100%; display: block; }
@@ -374,7 +378,7 @@
 
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
-        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-range" aria-label="调整 K 线交易日范围"><button id="range-more" onclick="changeKlineRange(60)" aria-label="增加60个交易日">−</button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="减少60个交易日">+</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线交易日范围"><button id="range-more" onclick="changeKlineRange(60)" aria-label="增加60个交易日">−</button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="减少60个交易日">+</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
         <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
     </section>
 </div>
@@ -415,6 +419,7 @@ let currentChartItems = [];
 let currentChartCode = '';
 let currentChartDays = 120;
 let currentChartLatest = false;
+let currentChartEndDate = '';
 let previewTimer = null;
 let previewRequest = null;
 const klineCache = new Map();
@@ -422,6 +427,7 @@ async function openKline(code) {
     currentChartCode = code;
     currentChartDays = 120;
     currentChartLatest = false;
+    currentChartEndDate = '{{ data.today }}';
     updateRangeControls();
     lastChartButton = document.activeElement;
     overlay.classList.add('open'); statusEl.style.display = 'grid'; statusEl.textContent = '正在加载行情…';
@@ -432,6 +438,8 @@ async function openKline(code) {
         if (!data.items.length) throw new Error('该日期前没有可显示的日线数据');
         document.getElementById('chart-title').textContent = `${code} ${data.name || ''}`;
         currentChartItems = data.items;
+        currentChartEndDate = data.items[data.items.length - 1].date;
+        updateDateControls();
         statusEl.style.display = 'none'; drawKline(currentChartItems);
     } catch (error) { statusEl.textContent = error.message; }
 }
@@ -446,10 +454,33 @@ async function showLatestKline() {
         if (!data.items.length) throw new Error('没有可显示的日线数据');
         currentChartItems = data.items;
         currentChartLatest = true;
+        currentChartEndDate = data.items[data.items.length - 1].date;
+        updateDateControls();
         document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日 · 更新至 ${data.items[data.items.length - 1].date}`;
         statusEl.style.display = 'none'; drawKline(currentChartItems);
     } catch (error) { statusEl.textContent = error.message; }
     finally { button.disabled = false; }
+}
+async function shiftKlineDate(direction) {
+    if (!currentChartCode || !currentChartEndDate) return;
+    const button = document.getElementById(direction < 0 ? 'date-prev' : 'date-next');
+    button.disabled = true; statusEl.style.display = 'grid'; statusEl.textContent = direction < 0 ? '正在加载前一交易日…' : '正在加载后一交易日…';
+    try {
+        const response = await fetch(`/api/kline/${encodeURIComponent(currentChartCode)}/shift?days=${currentChartDays}&end_date=${currentChartEndDate}&direction=${direction}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '行情请求失败');
+        if (!data.items.length) throw new Error('没有可显示的日线数据');
+        currentChartItems = data.items;
+        currentChartEndDate = data.items[data.items.length - 1].date;
+        currentChartLatest = currentChartEndDate === '{{ data.latest_date }}';
+        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日 · 截止 ${currentChartEndDate}`;
+        statusEl.style.display = 'none'; drawKline(currentChartItems); updateDateControls();
+    } catch (error) { statusEl.textContent = error.message; }
+    finally { updateDateControls(); }
+}
+function updateDateControls() {
+    document.getElementById('date-next').disabled = !currentChartEndDate || currentChartEndDate >= '{{ data.latest_date }}';
+    document.getElementById('date-prev').disabled = !currentChartEndDate;
 }
 async function changeKlineRange(delta) {
     const nextDays = Math.max(60, Math.min(240, currentChartDays + delta));
@@ -457,7 +488,7 @@ async function changeKlineRange(delta) {
     currentChartDays = nextDays; updateRangeControls();
     statusEl.style.display = 'grid'; statusEl.textContent = `正在加载${currentChartDays}个交易日…`;
     try {
-        const endDate = currentChartLatest ? '' : '{{ data.today }}';
+        const endDate = currentChartLatest ? '' : currentChartEndDate;
         const data = await fetchKline(currentChartCode, null, currentChartDays, endDate);
         if (!data.items.length) throw new Error('没有可显示的日线数据');
         currentChartItems = data.items;

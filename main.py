@@ -248,3 +248,25 @@ async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
             for r in rows
         ],
     }
+
+
+@app.get("/api/kline/{st_code}/shift", tags=["data"])
+async def shift_kline_data(st_code: str, end_date: str, direction: int, days: int = 120):
+    """依實際交易日向前或向後移動 K 線截止日。"""
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code) or direction not in (-1, 1):
+        return JSONResponse({"error": "參數不正確"}, status_code=400)
+    operator = "<" if direction < 0 else ">"
+    order = "DESC" if direction < 0 else "ASC"
+    db = _connect_db()
+    try:
+        cursor = db.cursor()
+        cursor.execute(
+            f"SELECT trade_date FROM st_daily WHERE ts_code=%s AND trade_date{operator}%s "
+            f"ORDER BY trade_date {order} LIMIT 1", (st_code, end_date))
+        row = cursor.fetchone()
+    finally:
+        db.close()
+    if not row:
+        return JSONResponse({"error": "已到可用交易日邊界"}, status_code=404)
+    return await kline_data(st_code, days, row[0])
