@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   注册 Windows 定时任务：每日全策略筛选
+echo   注册 Windows 定时任务：交易日全策略筛选
 echo ========================================
 echo.
 
@@ -24,7 +24,7 @@ if not exist "%PYTHON_PATH%" (
 echo 项目目录: %PROJECT_DIR%
 echo Python路径: %PYTHON_PATH%
 echo 任务名称: StockRunStrategies
-echo 执行时间: 每日 00:00
+echo 执行时间: 每日 00:00（检查前一日；周末及 A 股休市日自动跳过）
 echo.
 
 :: 删除已有任务（如果存在）
@@ -42,7 +42,7 @@ schtasks /create ^
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [成功] 定时任务已注册！
-    echo 任务将在每日 00:00 自动执行 runAllStrategies.py
+    echo 任务将在每日 00:00 启动，前一日为周末或 A 股休市日时自动退出
     echo.
     echo 可通过以下命令查看任务状态：
     echo   schtasks /query /tn "StockRunStrategies" /v

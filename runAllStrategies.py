@@ -3,6 +3,9 @@ import logging
 import os
 import sys
 
+import tushare as ts
+
+import loadStocks as ld
 import stockPolicy as sp
 
 # 创建logs目录
@@ -22,9 +25,38 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def is_a_share_trading_day(day=None):
+    """判断策略对应日期是否为 A 股交易日；午夜任务默认检查前一日。"""
+    day = day or (datetime.date.today() - datetime.timedelta(days=1))
+    if day.weekday() >= 5:
+        logger.info("%s 是周末，跳过策略筛选", day.strftime('%Y-%m-%d'))
+        return False
+
+    date_str = day.strftime('%Y%m%d')
+    try:
+        pro = ts.pro_api(ld.TUSHARE_TOKEN)
+        calendar = pro.trade_cal(
+            exchange='SSE', start_date=date_str, end_date=date_str,
+            fields='cal_date,is_open')
+        if calendar is None or calendar.empty:
+            logger.warning("未取得 %s 的交易日历，保守跳过本次策略筛选", date_str)
+            return False
+        is_open = int(calendar.iloc[0]['is_open']) == 1
+        if not is_open:
+            logger.info("%s 是 A 股休市日，跳过策略筛选", day.strftime('%Y-%m-%d'))
+        return is_open
+    except Exception as exc:
+        logger.error("查询 %s 交易日历失败，保守跳过本次策略筛选: %s", date_str, exc)
+        return False
+
+
 def run_all_strategies():
     """运行所有筛选策略，结果记录到日志"""
     logger.info("========== 全策略筛选开始 ==========")
+
+    if not is_a_share_trading_day():
+        logger.info("========== 非交易日，本次策略任务结束 ==========")
+        return {}
 
     today = datetime.date.today()
     start_date = (today - datetime.timedelta(days=30)).strftime('%Y%m%d')

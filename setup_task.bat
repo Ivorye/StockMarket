@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   注册 Windows 定时任务：每日股票数据更新
+echo   注册 Windows 定时任务：交易日股票数据更新
 echo ========================================
 echo.
 
@@ -24,7 +24,7 @@ if not exist "%PYTHON_PATH%" (
 echo 项目目录: %PROJECT_DIR%
 echo Python路径: %PYTHON_PATH%
 echo 任务名称: StockDailyUpdate
-echo 执行时间: 每日 20:00
+echo 执行时间: 每日 20:00（周末及 A 股休市日自动跳过）
 echo.
 
 :: 删除已有任务（如果存在）
@@ -42,7 +42,7 @@ schtasks /create ^
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [成功] 定时任务已注册！
-    echo 任务将在每日 20:00 自动执行 dailyUpdate.py
+    echo 任务将在每日 20:00 启动，周末及 A 股休市日会自动退出
     echo.
     echo 可通过以下命令查看任务状态：
     echo   schtasks /query /tn "StockDailyUpdate" /v
