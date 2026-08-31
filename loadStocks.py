@@ -178,103 +178,60 @@ def getJDZF(df='',start_date='',end_date='',rate=''):
 	return lst
 
 
-#增量加载日线数据：查询每张表最新日期，只补缺失天数
-#带断层检测和失败重试
+# 增量加载日线数据：按交易日批量获取全市场数据并批量入库。
+# 检查最近 lookback_days 天，仅处理数据库最新交易日之后的数据。
 def incrementalUpdateDailyData(df=None, lookback_days=30):
 	if(df is None or len(df)==0):
 		return
-	today_str=datetime.date.today().strftime('%Y%m%d')
+	today=datetime.date.today()
+	today_str=today.strftime('%Y%m%d')
+	start_str=(today-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
 	db=connectDB()
 	cursor=db.cursor()
 	pro=ts.pro_api(TUSHARE_TOKEN)
-	total=len(df)
-	updated=0
-	skipped=0
-	for k in range(total):
-		sym=df.loc[k].symbol
-		ts_code=df.loc[k].ts_code
-		#获取该表已有的所有日期（用于检测断层）
-		try:
-			cursor.execute("SELECT trade_date FROM st_daily WHERE ts_code=%s ORDER BY trade_date",(ts_code,))
-			existing=set(r[0] for r in cursor.fetchall())
-		except Exception:
-			existing=set()
-		if existing:
-			latest=max(existing)
-			#检测断层：统计日期范围内的工作日数 vs 实际行数
-			earliest=min(existing)
-			span_days=int((datetime.datetime.strptime(latest,'%Y%m%d')-datetime.datetime.strptime(earliest,'%Y%m%d')).days)
-			#工作日约为跨度天数的5/7，如果实际行数不到预期的80%，说明有断层
-			expected_trading_days=int(span_days*5/7)
-			if span_days>10 and len(existing)<expected_trading_days*0.8:
-				#有断层，按缺失天数回溯（至少lookback_days，最多覆盖全部缺失）
-				missing_days=expected_trading_days-len(existing)
-				lookback=max(lookback_days,missing_days*2+30)
-				start=(datetime.date.today()-datetime.timedelta(days=lookback)).strftime('%Y%m%d')
-				print(time.ctime(),'%s: 检测到%d天断层，回溯%d天加载'%(sym,missing_days,lookback))
-			elif latest>=today_str:
-				skipped+=1
-				if k%200==199:
-					print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
+	try:
+		# dailyUpdate 入口已确认今天是交易日。这里不再次调用低额度 trade_cal API；
+		# 历史节假日作为候选日期调用 daily 时会返回空集，可安全跳过。
+		trade_dates=[]
+		candidate=today-datetime.timedelta(days=lookback_days)
+		while candidate<=today:
+			if candidate.weekday()<5:
+				trade_dates.append(candidate.strftime('%Y%m%d'))
+			candidate+=datetime.timedelta(days=1)
+
+		cursor.execute("SELECT MAX(trade_date) FROM st_daily")
+		latest_date=cursor.fetchone()[0]
+		# 只获取最新入库日之后的工作日；历史节假日和停牌不会被反复误判为缺口。
+		pending_dates=[d for d in trade_dates if not latest_date or d>latest_date]
+		print(time.ctime(),'batch daily update: %d candidate days checked, %d pending, latest=%s'%(
+			len(trade_dates),len(pending_dates),latest_date))
+
+		sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE symbol=VALUES(symbol),openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
+		total_rows=0
+		for trade_date in pending_dates:
+			data=None
+			for retry in range(3):
+				try:
+					data=pro.daily(trade_date=trade_date)
+					break
+				except Exception as e:
+					print("API异常(重试%d/3) %s: %s"%(retry+1,trade_date,e))
+					time.sleep(5)
+			if data is None or data.empty:
+				print(time.ctime(),trade_date,'returned no daily data')
 				continue
-			else:
-				start=(datetime.datetime.strptime(latest,'%Y%m%d')+datetime.timedelta(days=1)).strftime('%Y%m%d')
-		else:
-			start=(datetime.date.today()-datetime.timedelta(days=lookback_days)).strftime('%Y%m%d')
-		#调用API获取数据
-		data=None
-		for retry in range(3):
-			try:
-				data=pro.daily(ts_code=ts_code,start_date=start,end_date=today_str)
-				break
-			except Exception as e:
-				print("API异常(重试%d/3) %s: %s"%(retry+1,ts_code,e))
-				time.sleep(5)
-		if data is None or len(data)==0:
-			skipped+=1
-			if k%200==199:
-				print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
-			continue
-		#检测API返回的数据是否有大段断层（>10个交易日缺失）
-		dates=sorted(data.trade_date.tolist())
-		has_major_gap=False
-		for i in range(len(dates)-1):
-			d1=datetime.datetime.strptime(dates[i],'%Y%m%d')
-			d2=datetime.datetime.strptime(dates[i+1],'%Y%m%d')
-			if (d2-d1).days>15:
-				print("警告 %s: API数据有断层 %s->%s"%(ts_code,dates[i],dates[i+1]))
-				has_major_gap=True
-				break
-		#逐行插入（INSERT IGNORE跳过已有行，不影响其他行）
-		sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
-		inserted=0
-		for i in range(len(data)):
-			td=data.iloc[i].trade_date
-			if td in existing:
-				continue
-			try:
-				cursor.execute(sql,(
-					ts_code,sym,td,
-					float(data.iloc[i].open),
-					float(data.iloc[i].high),
-					float(data.iloc[i].low),
-					float(data.iloc[i].close),
-					float(data.iloc[i].pre_close),
-					float(data.iloc[i].change),
-					float(data.iloc[i].pct_chg),
-					float(data.iloc[i].vol),
-					float(data.iloc[i].amount),
-				))
-				if cursor.rowcount>0:
-					inserted+=1
-			except Exception as e:
-				print("插入异常 %s %s: %s"%(sym,td,e))
-		db.commit()
-		updated+=1
-		if inserted>0 or has_major_gap:
-			print(time.ctime(),'%s: %d rows inserted, gap=%s'%(sym,inserted,has_major_gap))
-		if k%200==199:
-			print(time.ctime(),k+1,'processed,',skipped,'up-to-date,',updated,'updated')
-		time.sleep(1.5)
-	db.close()
-	print(time.ctime(),'incrementalUpdate done: %d updated, %d up-to-date, %d total'%(updated,skipped,total))
+			rows=[(
+				str(row.ts_code),str(row.ts_code).split('.')[0],str(row.trade_date),
+				float(row.open),float(row.high),float(row.low),float(row.close),
+				float(row.pre_close),float(row.change),float(row.pct_chg),
+				float(row.vol),float(row.amount)
+			) for row in data.itertuples(index=False)]
+			cursor.executemany(sql,rows)
+			db.commit()
+			total_rows+=len(rows)
+			print(time.ctime(),'%s: %d rows upserted'%(trade_date,len(rows)))
+		print(time.ctime(),'batch daily update done: %d dates, %d rows'%(
+			len(pending_dates),total_rows))
+	finally:
+		cursor.close()
+		db.close()
