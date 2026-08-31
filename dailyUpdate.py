@@ -3,8 +3,6 @@ import logging
 import os
 import sys
 
-import tushare as ts
-
 import loadStocks as ld
 import stockPolicy as sp
 
@@ -26,28 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def is_a_share_trading_day(day=None):
-    """判断指定日期是否为 A 股交易日；日历不可用时保守返回 False。"""
+    """周末直接跳过；工作日由 daily API 是否返回数据判断休市。"""
     day = day or datetime.date.today()
     if day.weekday() >= 5:
         logger.info("%s 是周末，跳过股票数据更新", day.strftime('%Y-%m-%d'))
         return False
-
-    date_str = day.strftime('%Y%m%d')
-    try:
-        pro = ts.pro_api(ld.TUSHARE_TOKEN)
-        calendar = pro.trade_cal(
-            exchange='SSE', start_date=date_str, end_date=date_str,
-            fields='cal_date,is_open')
-        if calendar is None or calendar.empty:
-            logger.warning("未取得 %s 的交易日历，保守跳过本次更新", date_str)
-            return False
-        is_open = int(calendar.iloc[0]['is_open']) == 1
-        if not is_open:
-            logger.info("%s 是 A 股休市日，跳过股票数据更新", day.strftime('%Y-%m-%d'))
-        return is_open
-    except Exception as exc:
-        logger.error("查询 %s 交易日历失败，保守跳过本次更新: %s", date_str, exc)
-        return False
+    # 避免调用每日额度很低的 trade_cal。法定休市日调用 daily 会返回空数据，
+    # 批量更新逻辑会将其安全地视为无数据日期。
+    return True
 
 
 def run_daily_update():
