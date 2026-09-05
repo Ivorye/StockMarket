@@ -126,7 +126,7 @@ def _load_yearly_double_results():
         start_date = (datetime.datetime.strptime(end_date, '%Y%m%d').date()
                       - datetime.timedelta(days=365)).strftime('%Y%m%d')
         cursor.execute(
-            "SELECT d.ts_code,d.trade_date,d.low,d.high,COALESCE(s.fullname,'') AS name "
+            "SELECT d.ts_code,d.trade_date,d.low,d.high,d.closep,COALESCE(s.fullname,'') AS name "
             "FROM st_daily d LEFT JOIN stocks s ON s.st_code=d.ts_code "
             "WHERE d.trade_date BETWEEN %s AND %s "
             "AND d.low IS NOT NULL AND d.high IS NOT NULL AND d.low>0 AND d.high>0 "
@@ -144,10 +144,12 @@ def _load_yearly_double_results():
             min_date = ''
             best_high = None
             best_date = ''
+            latest_row = None
             name = rows[0]['name']
             for row in rows:
                 low = float(row['low'])
                 high = float(row['high'])
+                close = float(row['closep']) if row['closep'] is not None else None
                 if min_low is None or low < min_low:
                     min_low = low
                     min_date = row['trade_date']
@@ -156,7 +158,11 @@ def _load_yearly_double_results():
                 if min_low is not None and high > best_high:
                     best_high = high
                     best_date = row['trade_date']
+                if close is not None and (latest_row is None or row['trade_date'] >= latest_row['trade_date']):
+                    latest_row = row
             if min_low and best_high / min_low >= 2:
+                latest_close = float(latest_row['closep']) if latest_row and latest_row['closep'] is not None else None
+                gain_since = round((latest_close / min_low - 1) * 100, 1) if latest_close and latest_close > 0 and min_low > 0 else None
                 items.append({
                     'st_code': st_code,
                     'name': name,
@@ -166,6 +172,8 @@ def _load_yearly_double_results():
                     'high_date': best_date,
                     'high_price': round(best_high, 2),
                     'gain_pct': round((best_high / min_low - 1) * 100, 1),
+                    'latest_close': round(latest_close, 2) if latest_close is not None else None,
+                    'gain_since_pct': gain_since,
                 })
 
         items.sort(key=lambda item: item['gain_pct'], reverse=True)

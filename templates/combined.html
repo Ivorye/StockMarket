@@ -414,7 +414,7 @@
     <div class="panel" id="panel-yearly-double">
         <div class="strategy-note" id="yearly-double-note">正在加载最近一年低点到高点翻倍股；首次扫描可能需要约 1 分钟，结果会缓存30分钟。</div>
         <div class="table-scroll" id="yearly-double-table-wrap" style="display:none;"><table>
-            <thead><tr><th>#</th><th>股票</th><th>名称</th><th>最低日</th><th>最低价</th><th>最高日</th><th>最高价</th><th>区间涨幅</th></tr></thead>
+            <thead><tr><th>#</th><th>股票</th><th>名称</th><th>最低日</th><th>最低价</th><th>最高日</th><th>最高价</th><th>区间涨幅</th><th>当前价</th><th>低点至今</th></tr></thead>
             <tbody id="yearly-double-body"></tbody>
         </table></div>
         <div class="empty" id="yearly-double-empty">正在加载…</div>
@@ -656,6 +656,8 @@ async function loadYearlyDouble() {
                 <td>${escapeHtml(r.high_date)}</td>
                 <td>${Number(r.high_price).toFixed(2)}</td>
                 <td><span class="tag tag-red">${Number(r.gain_pct).toFixed(1)}%</span></td>
+                <td>${r.latest_close != null ? Number(r.latest_close).toFixed(2) : '-'}</td>
+                <td>${r.gain_since_pct != null ? `<span class="tag tag-red">${Number(r.gain_since_pct).toFixed(1)}%</span>` : '-'}</td>
             </tr>`).join('');
         empty.style.display = 'none';
         wrap.style.display = 'block';
