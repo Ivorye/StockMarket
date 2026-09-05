@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def is_a_share_trading_day(day=None):
-    """判断策略对应日期是否为 A 股交易日；午夜任务默认检查前一日。"""
-    day = day or (datetime.date.today() - datetime.timedelta(days=1))
+    """判断策略对应日期是否为 A 股交易日。"""
+    day = day or datetime.date.today()
     if day.weekday() >= 5:
         logger.info("%s 是周末，跳过策略筛选", day.strftime('%Y-%m-%d'))
         return False

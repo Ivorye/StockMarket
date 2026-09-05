@@ -25,6 +25,7 @@
         .stat-card .value.blue { color: #1677ff; }
         .stat-card .value.orange { color: #fa8c16; }
         .stat-card .value.green { color: #52c41a; }
+        .stat-card .value.purple { color: #722ed1; }
 
         .tabs { display: flex; gap: 0; margin-bottom: 0; }
         .tab { padding: 10px 24px; font-size: 14px; cursor: pointer; border: 1px solid #d9d9d9; border-bottom: none; border-radius: 8px 8px 0 0; background: #fafafa; color: #666; transition: all 0.15s; }
@@ -167,6 +168,10 @@
                 {% else %}-{% endif %}
             </div>
         </div>
+        <div class="stat-card">
+            <div class="label">近一年翻倍股</div>
+            <div class="value purple" id="yearly-double-count">{{ yearly_double.count }}</div>
+        </div>
     </div>
 
     <div class="legend">
@@ -181,6 +186,7 @@
         <div class="tab" onclick="switchTab(event, 'combined')">合并策略 ({{ data.combined | length }})</div>
         <div class="tab" onclick="switchTab(event, 'gap')">跳空缺口 ({{ data.s2 | length }})</div>
         <div class="tab" onclick="switchTab(event, 'surge')">放量涨幅 ({{ data.s1 | length }})</div>
+        <div class="tab" onclick="switchTab(event, 'yearly-double')">年度翻倍股 (<span id="yearly-double-tab-count">{{ yearly_double.count }}</span>)</div>
         <div class="tab" onclick="switchTab(event, 'backtest')">回测结果{% if backtest.available %} ({{ backtest.signal_count }}){% endif %}</div>
     </div>
 
@@ -390,6 +396,15 @@
         {% endif %}
     </div>
 
+    <div class="panel" id="panel-yearly-double">
+        <div class="strategy-note" id="yearly-double-note">正在加载最近一年低点到高点翻倍股；首次扫描可能需要约 1 分钟，结果会缓存30分钟。</div>
+        <div class="table-scroll" id="yearly-double-table-wrap" style="display:none;"><table>
+            <thead><tr><th>#</th><th>股票</th><th>名称</th><th>最低日</th><th>最低价</th><th>最高日</th><th>最高价</th><th>区间涨幅</th></tr></thead>
+            <tbody id="yearly-double-body"></tbody>
+        </table></div>
+        <div class="empty" id="yearly-double-empty">正在加载…</div>
+    </div>
+
     <div class="panel" id="panel-backtest">
         {% if backtest.available %}
         <div class="backtest-verdict"><strong>结论：</strong>{{ backtest.conclusion }}</div>
@@ -588,6 +603,53 @@ document.querySelectorAll('.kline-preview-trigger').forEach(button => {
     button.addEventListener('focus', () => schedulePreview(button));
     button.addEventListener('blur', hidePreview);
 });
+function bindPreviewTriggers(root = document) {
+    root.querySelectorAll('.kline-preview-trigger:not([data-preview-bound])').forEach(button => {
+        button.dataset.previewBound = '1';
+        button.addEventListener('mouseenter', () => schedulePreview(button));
+        button.addEventListener('mouseleave', hidePreview);
+        button.addEventListener('focus', () => schedulePreview(button));
+        button.addEventListener('blur', hidePreview);
+    });
+}
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+}
+async function loadYearlyDouble() {
+    const note = document.getElementById('yearly-double-note');
+    const empty = document.getElementById('yearly-double-empty');
+    const wrap = document.getElementById('yearly-double-table-wrap');
+    const body = document.getElementById('yearly-double-body');
+    try {
+        const response = await fetch('/api/yearly-double');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '年度翻倍股请求失败');
+        document.getElementById('yearly-double-count').textContent = result.count;
+        document.getElementById('yearly-double-tab-count').textContent = result.count;
+        note.textContent = `区间 ${result.start_date} 至 ${result.end_date}，按“先出现区间最低价 low，之后最高价 high 至少达到 2 倍”筛选；共扫描 ${result.scanned} 只股票，默认展示涨幅最高的前 ${result.items.length} 只。`;
+        if (!result.items.length) {
+            empty.textContent = '最近一年没有符合“低点后高点翻倍”的股票。';
+            return;
+        }
+        body.innerHTML = result.items.map((r, index) => `
+            <tr>
+                <td>${index + 1}</td>
+                <td class="code"><a href="${escapeHtml(r.eastmoney_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.st_code)}</a><button class="kline-trigger" onclick="openKline('${escapeHtml(r.st_code)}')">K线</button><button class="kline-preview-trigger" data-code="${escapeHtml(r.st_code)}" type="button">预览</button></td>
+                <td>${escapeHtml(r.name)}</td>
+                <td>${escapeHtml(r.low_date)}</td>
+                <td>${Number(r.low_price).toFixed(2)}</td>
+                <td>${escapeHtml(r.high_date)}</td>
+                <td>${Number(r.high_price).toFixed(2)}</td>
+                <td><span class="tag tag-red">${Number(r.gain_pct).toFixed(1)}%</span></td>
+            </tr>`).join('');
+        empty.style.display = 'none';
+        wrap.style.display = 'block';
+        bindPreviewTriggers(wrap);
+    } catch (error) {
+        empty.textContent = error.message;
+    }
+}
+loadYearlyDouble();
 function drawKline(items, targetCanvas = canvas) {
     const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
     targetCanvas.width = rect.width * dpr; targetCanvas.height = rect.height * dpr;

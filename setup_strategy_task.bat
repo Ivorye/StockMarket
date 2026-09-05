@@ -24,7 +24,7 @@ if not exist "%PYTHON_PATH%" (
 echo 项目目录: %PROJECT_DIR%
 echo Python路径: %PYTHON_PATH%
 echo 任务名称: StockRunStrategies
-echo 执行时间: 每日 00:00（检查前一日；周末及 A 股休市日自动跳过）
+echo 执行时间: 每日 20:02（StockDailyUpdate 今天20:00后成功完成才执行）
 echo.
 
 :: 删除已有任务（如果存在）
@@ -33,16 +33,16 @@ schtasks /delete /tn "StockRunStrategies" /f >nul 2>&1
 :: 创建定时任务
 schtasks /create ^
     /tn "StockRunStrategies" ^
-    /tr "\"%PYTHON_PATH%\" \"%PROJECT_DIR%\runAllStrategies.py\"" ^
+    /tr "\"%PYTHON_PATH%\" \"%PROJECT_DIR%\runStrategiesAfterDailyUpdate.py\"" ^
     /sc daily ^
-    /st 00:00 ^
+    /st 20:02 ^
     /rl HIGHEST ^
     /f
 
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [成功] 定时任务已注册！
-    echo 任务将在每日 00:00 启动，前一日为周末或 A 股休市日时自动退出
+    echo 任务将在每日 20:02 启动，StockDailyUpdate 今天20:00后成功完成才执行
     echo.
     echo 可通过以下命令查看任务状态：
     echo   schtasks /query /tn "StockRunStrategies" /v

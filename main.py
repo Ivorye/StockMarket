@@ -2,6 +2,7 @@ import time
 import os
 import csv
 import re
+import datetime
 import pymysql
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -23,12 +24,12 @@ _CACHE_TTL = 1800  # 30分钟
 _DB_TIMEOUT_SECONDS = 15
 
 
-def _connect_db():
+def _connect_db(timeout_seconds=_DB_TIMEOUT_SECONDS):
     return pymysql.connect(
         host='localhost', user='root', password='P@ssw0rd', database='stockshare',
-        connect_timeout=_DB_TIMEOUT_SECONDS,
-        read_timeout=_DB_TIMEOUT_SECONDS,
-        write_timeout=_DB_TIMEOUT_SECONDS,
+        connect_timeout=timeout_seconds,
+        read_timeout=timeout_seconds,
+        write_timeout=timeout_seconds,
     )
 
 
@@ -94,6 +95,92 @@ def _load_backtest_results():
     result['conclusion'] = ('各持有期勝率均低於50%，且中位報酬為負；平均報酬受到少數大漲樣本拉高，'
                             '目前不適合單獨作為買入訊號。')
     return result
+
+
+def _load_yearly_double_results():
+    """最近一年内，从最低点 low 到之后最高点 high 至少翻倍的股票。"""
+    cache_key = '__yearly_double__'
+    now = time.time()
+    if cache_key in _cache:
+        ts, data = _cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            return data
+
+    result = {
+        'available': False,
+        'start_date': '',
+        'end_date': '',
+        'scanned': 0,
+        'count': 0,
+        'items': [],
+    }
+    db = _connect_db(timeout_seconds=120)
+    try:
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (120 * 1000,))
+        cursor.execute("SELECT MAX(trade_date) AS max_date FROM st_daily")
+        row = cursor.fetchone()
+        end_date = row['max_date'] if row else ''
+        if not end_date:
+            return result
+        start_date = (datetime.datetime.strptime(end_date, '%Y%m%d').date()
+                      - datetime.timedelta(days=365)).strftime('%Y%m%d')
+        cursor.execute(
+            "SELECT d.ts_code,d.trade_date,d.low,d.high,COALESCE(s.fullname,'') AS name "
+            "FROM st_daily d LEFT JOIN stocks s ON s.st_code=d.ts_code "
+            "WHERE d.trade_date BETWEEN %s AND %s "
+            "AND d.low IS NOT NULL AND d.high IS NOT NULL AND d.low>0 AND d.high>0 "
+            "ORDER BY d.ts_code,d.trade_date",
+            (start_date, end_date),
+        )
+
+        grouped = {}
+        for row in cursor.fetchall():
+            grouped.setdefault(row['ts_code'], []).append(row)
+
+        items = []
+        for st_code, rows in grouped.items():
+            min_low = None
+            min_date = ''
+            best_high = None
+            best_date = ''
+            name = rows[0]['name']
+            for row in rows:
+                low = float(row['low'])
+                high = float(row['high'])
+                if min_low is None or low < min_low:
+                    min_low = low
+                    min_date = row['trade_date']
+                    best_high = high
+                    best_date = row['trade_date']
+                if min_low is not None and high > best_high:
+                    best_high = high
+                    best_date = row['trade_date']
+            if min_low and best_high / min_low >= 2:
+                items.append({
+                    'st_code': st_code,
+                    'name': name,
+                    'eastmoney_url': _eastmoney_url(st_code),
+                    'low_date': min_date,
+                    'low_price': round(min_low, 2),
+                    'high_date': best_date,
+                    'high_price': round(best_high, 2),
+                    'gain_pct': round((best_high / min_low - 1) * 100, 1),
+                })
+
+        items.sort(key=lambda item: item['gain_pct'], reverse=True)
+        result.update({
+            'available': True,
+            'start_date': start_date,
+            'end_date': end_date,
+            'scanned': len(grouped),
+            'count': len(items),
+            'items': items[:200],
+        })
+        _cache[cache_key] = (now, result)
+        return result
+    finally:
+        db.close()
 
 
 def _save_signals(rows, strategy, trade_date):
@@ -266,8 +353,15 @@ async def combined_page(request: Request, date: str = ''):
         "request": request,
         "data": data,
         "backtest": _load_backtest_results(),
+        "yearly_double": {'count': '-', 'items': [], 'start_date': '', 'end_date': '', 'scanned': 0},
         "date": date or data['today'],
     })
+
+
+@app.get("/api/yearly-double", tags=["data"])
+async def yearly_double_data():
+    """返回最近一年低点后高点翻倍股票。"""
+    return _load_yearly_double_results()
 
 
 @app.get("/api/kline/{st_code}", tags=["data"])
