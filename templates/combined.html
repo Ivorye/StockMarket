@@ -152,11 +152,14 @@
         <span class="cache-hint">结果缓存30分钟，同一日期查询秒加载</span>
 
         <form class="stock-query" onsubmit="queryStockChart(); return false;">
-            <label style="font-size:14px;">股票代码:</label>
-            <input id="stock-code-input" type="text" placeholder="000001.SZ" autocomplete="off" />
+            <label style="font-size:14px;">股票代码或名称:</label>
+            <div style="position:relative;">
+                <input id="stock-code-input" type="text" placeholder="输入代码或名称，如 000001.SZ / 贵州茅台" autocomplete="off" />
+                <div id="stock-suggest" role="listbox" aria-label="股票候选列表" style="display:none;position:absolute;z-index:30;left:0;top:calc(100% + 6px);width:340px;max-height:260px;overflow:auto;border:1px solid #d9d9d9;border-radius:6px;background:#fff;box-shadow:0 6px 20px rgba(0,0,0,.12);"></div>
+            </div>
             <button type="button" class="btn-primary" onclick="queryStockChart()">查看K线</button>
         </form>
-        <div class="stock-result" id="stock-query-result"></div>
+        <div class="stock-result" id="stock-query-result">支持直接输入名称模糊搜索，例如“茅台”“平安”“半导体”。</div>
     </div>
 
     <div class="stats">
@@ -662,13 +665,54 @@ async function loadYearlyDouble() {
     }
 }
 loadYearlyDouble();
+let suggestTimer = null;
+let latestCandidates = [];
+let activeSuggestIndex = -1;
+function closeSuggest() {
+    const box = document.getElementById('stock-suggest');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    activeSuggestIndex = -1;
+}
+function chooseCandidate(code) {
+    const input = document.getElementById('stock-code-input');
+    input.value = code;
+    closeSuggest();
+    queryStockChart();
+}
+function renderCandidates(items, keyword) {
+    const box = document.getElementById('stock-suggest');
+    if (!items.length) { box.innerHTML = '<div style="padding:10px 12px;color:#888;">未找到匹配股票</div>'; box.style.display = 'block'; return; }
+    latestCandidates = items;
+    box.innerHTML = items.map((item, index) => {
+        const simpleCode = escapeHtml(item.code);
+        const left = index === activeSuggestIndex ? 'background:#f0f5ff;' : '';
+        return `<div role="option" data-index="${index}" onmousedown="chooseCandidate('${simpleCode}')" style="display:flex;justify-content:space-between;gap:8px;padding:8px 12px;cursor:pointer;${left}">
+            <span><strong>${simpleCode}</strong> ${escapeHtml(item.name)}</span>
+            <span style="color:#1677ff;font-size:12px;">查看K线</span>
+        </div>`;
+    }).join('');
+    box.style.display = 'block';
+}
+async function fetchCandidates(keyword) {
+    if (!keyword || keyword.length < 1) { closeSuggest(); return; }
+    const response = await fetch(`/api/search-stock?q=${encodeURIComponent(keyword)}`);
+    if (!response.ok) return;
+    const items = await response.json();
+    renderCandidates(items, keyword);
+}
 async function queryStockChart() {
     const input = document.getElementById('stock-code-input');
     const resultEl = document.getElementById('stock-query-result');
-    const raw = (input.value || '').trim().toUpperCase();
-    if (!raw) { resultEl.innerHTML = '<span class="empty">请输入股票代码，例如 000001.SZ 或 600519.SH</span>'; return; }
-    const code = /^\d{6}$/.test(raw) ? raw + '.SZ' : raw;
-    if (!/^\d{6}\.(SZ|SH|BJ)$/.test(code)) { alert('请输入正确格式，如 000001.SZ / 600519.SH'); return; }
+    const raw = (input.value || '').trim();
+    if (!raw) { resultEl.innerHTML = '<span class="empty">请输入代码或名称，例如 000001.SZ / 贵州茅台 / 平安</span>'; return; }
+    if (latestCandidates.length && activeSuggestIndex >= 0 && activeSuggestIndex < latestCandidates.length) {
+        chooseCandidate(latestCandidates[activeSuggestIndex].code);
+        return;
+    }
+    let code = raw.toUpperCase();
+    if (/^\d{6}$/.test(code)) code = code + '.SZ';
+    if (!/^\d{6}\.(SZ|SH|BJ)$/.test(code)) { resultEl.innerHTML = '请输入完整代码或股票名称后从候选中选择。'; return; }
+    closeSuggest();
     resultEl.innerHTML = '正在查询…';
     try {
         const data = await fetchKline(code);
@@ -685,6 +729,21 @@ async function queryStockChart() {
         resultEl.innerHTML = '查询失败：' + escapeHtml(error.message);
     }
 }
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('stock-code-input');
+    input.addEventListener('input', () => {
+        clearTimeout(suggestTimer);
+        activeSuggestIndex = -1;
+        suggestTimer = setTimeout(() => fetchCandidates((input.value || '').trim()), 220);
+    });
+    input.addEventListener('keydown', (event) => {
+        if (!latestCandidates.length && event.key !== 'Escape') return;
+        if (event.key === 'ArrowDown') { activeSuggestIndex = Math.min(activeSuggestIndex + 1, latestCandidates.length - 1); renderCandidates(latestCandidates, input.value); event.preventDefault(); }
+        else if (event.key === 'ArrowUp') { activeSuggestIndex = Math.max(activeSuggestIndex - 1, 0); renderCandidates(latestCandidates, input.value); event.preventDefault(); }
+        else if (event.key === 'Escape') { closeSuggest(); }
+    });
+    input.addEventListener('blur', () => setTimeout(closeSuggest, 180));
+});
 function drawKline(items, targetCanvas = canvas) {
     const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
     targetCanvas.width = rect.width * dpr; targetCanvas.height = rect.height * dpr;

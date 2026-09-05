@@ -364,6 +364,37 @@ async def yearly_double_data():
     return _load_yearly_double_results()
 
 
+@app.get("/api/search-stock", tags=["data"])
+async def search_stock(q: str = '', limit: int = 10):
+    """按股票代码或名称模糊搜索，返回候选列表。"""
+    keyword = (q or '').strip()
+    if not keyword:
+        return []
+    limit = max(1, min(limit, 20))
+    db = _connect_db()
+    try:
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(
+            "SELECT st_code AS code, fullname AS name "
+            "FROM stocks "
+            "WHERE st_code LIKE %s OR fullname LIKE %s "
+            "ORDER BY st_code "
+            "LIMIT %s",
+            (f'%{keyword}%', f'%{keyword}%', limit),
+        )
+        rows = cursor.fetchall()
+    finally:
+        db.close()
+    return [
+        {
+            'code': row['code'],
+            'name': row['name'],
+            'eastmoney_url': _eastmoney_url(row['code']),
+        }
+        for row in rows
+    ]
+
+
 @app.get("/api/kline/{st_code}", tags=["data"])
 async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
     """返回指定股票的 K 線與成交量資料。"""
