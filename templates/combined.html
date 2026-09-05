@@ -11,11 +11,16 @@
         h1 { font-size: 22px; margin-bottom: 4px; }
         .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
 
-        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
         .controls input[type="text"] { padding: 8px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 130px; }
         .controls button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .btn-primary { background: #1677ff; color: #fff; }
         .btn-primary:hover { background: #4096ff; }
+        .stock-query { display: flex; gap: 8px; align-items: center; }
+        .stock-query input[type="text"] { width: 150px; }
+        .stock-result { font-size: 13px; color: #555; }
+        .stock-result .empty { padding: 0; font-size: 13px; color: #bbb; }
+        .ml-2 { margin-left: 8px; }
 
         .stats { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
         .stat-card { background: #fff; border-radius: 8px; padding: 16px 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); min-width: 130px; text-align: center; }
@@ -145,6 +150,13 @@
         </form>
         <span style="font-size:13px;color:#999;">留空则使用最新交易日</span>
         <span class="cache-hint">结果缓存30分钟，同一日期查询秒加载</span>
+
+        <form class="stock-query" onsubmit="queryStockChart(); return false;">
+            <label style="font-size:14px;">股票代码:</label>
+            <input id="stock-code-input" type="text" placeholder="000001.SZ" autocomplete="off" />
+            <button type="button" class="btn-primary" onclick="queryStockChart()">查看K线</button>
+        </form>
+        <div class="stock-result" id="stock-query-result"></div>
     </div>
 
     <div class="stats">
@@ -650,6 +662,29 @@ async function loadYearlyDouble() {
     }
 }
 loadYearlyDouble();
+async function queryStockChart() {
+    const input = document.getElementById('stock-code-input');
+    const resultEl = document.getElementById('stock-query-result');
+    const raw = (input.value || '').trim().toUpperCase();
+    if (!raw) { resultEl.innerHTML = '<span class="empty">请输入股票代码，例如 000001.SZ 或 600519.SH</span>'; return; }
+    const code = /^\d{6}$/.test(raw) ? raw + '.SZ' : raw;
+    if (!/^\d{6}\.(SZ|SH|BJ)$/.test(code)) { alert('请输入正确格式，如 000001.SZ / 600519.SH'); return; }
+    resultEl.innerHTML = '正在查询…';
+    try {
+        const data = await fetchKline(code);
+        if (!data.items.length) { resultEl.innerHTML = '未查询到可展示的日线数据'; return; }
+        const lastItem = data.items[data.items.length - 1];
+        resultEl.innerHTML = `
+            <span>${escapeHtml(data.name || '-')}</span>
+            <span class="tag tag-blue ml-2">${escapeHtml(code)}</span>
+            <span class="ml-2">最新: ${escapeHtml(lastItem.date)} 收盘 ${Number(lastItem.close).toFixed(2)}</span>
+            <button class="kline-trigger ml-2" onclick="openKline('${escapeHtml(code)}')">查看K线</button>
+        `;
+        openKline(code);
+    } catch (error) {
+        resultEl.innerHTML = '查询失败：' + escapeHtml(error.message);
+    }
+}
 function drawKline(items, targetCanvas = canvas) {
     const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
     targetCanvas.width = rect.width * dpr; targetCanvas.height = rect.height * dpr;
