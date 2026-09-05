@@ -174,6 +174,7 @@ def _load_yearly_double_results():
                     'gain_pct': round((best_high / min_low - 1) * 100, 1),
                     'latest_close': round(latest_close, 2) if latest_close is not None else None,
                     'gain_since_pct': gain_since,
+                    'high_drawdown_pct': round((latest_close - best_high) / best_high * 100, 1) if latest_close is not None and best_high and best_high > 0 else None,
                 })
 
         items.sort(key=lambda item: item['gain_pct'], reverse=True)
