@@ -16,6 +16,7 @@ templates = Jinja2Templates(directory="templates")
 def _init_db():
     import stockPolicy as sp
     sp.createSignalTable()
+    sp.ensureStocksNameColumn()
 
 
 # 内存缓存: {cache_key: (timestamp, data)}
@@ -126,7 +127,7 @@ def _load_yearly_double_results():
         start_date = (datetime.datetime.strptime(end_date, '%Y%m%d').date()
                       - datetime.timedelta(days=365)).strftime('%Y%m%d')
         cursor.execute(
-            "SELECT d.ts_code,d.trade_date,d.low,d.high,d.closep,COALESCE(s.fullname,'') AS name "
+            "SELECT d.ts_code,d.trade_date,d.low,d.high,d.closep,COALESCE(NULLIF(s.name,''),s.fullname,'') AS name "
             "FROM st_daily d LEFT JOIN stocks s ON s.st_code=d.ts_code "
             "WHERE d.trade_date BETWEEN %s AND %s "
             "AND d.low IS NOT NULL AND d.high IS NOT NULL AND d.low>0 AND d.high>0 "
@@ -309,13 +310,13 @@ def _run_combined_strategy(date_str=''):
     if len(smooth_dates) == 30:
         placeholders = ','.join(['%s'] * 30)
         cursor.execute(
-            "SELECT d.ts_code,COALESCE(s.fullname,''),d.closep FROM st_daily d "
+            "SELECT d.ts_code,COALESCE(NULLIF(s.name,''),s.fullname,''),d.closep FROM st_daily d "
             "LEFT JOIN stocks s ON s.st_code=d.ts_code "
             f"WHERE d.trade_date IN ({placeholders}) AND d.symbol NOT LIKE '688%%' "
             "ORDER BY d.ts_code,d.trade_date", tuple(smooth_dates))
         grouped = {}
-        for st_code, fullname, closep in cursor.fetchall():
-            item = grouped.setdefault(st_code, {'name': fullname, 'closes': []})
+        for st_code, sname, closep in cursor.fetchall():
+            item = grouped.setdefault(st_code, {'name': sname, 'closes': []})
             item['closes'].append(float(closep))
         for st_code, item in grouped.items():
             if len(item['closes']) != 30:
@@ -384,12 +385,12 @@ async def search_stock(q: str = '', limit: int = 10):
     try:
         cursor = db.cursor(pymysql.cursors.DictCursor)
         cursor.execute(
-            "SELECT st_code AS code, fullname AS name "
+            "SELECT st_code AS code, COALESCE(NULLIF(name,''), fullname) AS name "
             "FROM stocks "
-            "WHERE st_code LIKE %s OR fullname LIKE %s "
+            "WHERE st_code LIKE %s OR name LIKE %s OR fullname LIKE %s "
             "ORDER BY st_code "
             "LIMIT %s",
-            (f'%{keyword}%', f'%{keyword}%', limit),
+            (f'%{keyword}%', f'%{keyword}%', f'%{keyword}%', limit),
         )
         rows = cursor.fetchall()
     finally:
@@ -419,7 +420,7 @@ async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
         params = (st_code, end_date, days) if end_date else (st_code, days)
         cursor.execute(
             "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,"
-            "COALESCE(s.fullname,'') FROM st_daily d "
+            "COALESCE(NULLIF(s.name,''),s.fullname,'') FROM st_daily d "
             "LEFT JOIN stocks s ON s.st_code=d.ts_code "
             f"WHERE d.ts_code=%s {date_filter} "
             "ORDER BY d.trade_date DESC LIMIT %s", params)

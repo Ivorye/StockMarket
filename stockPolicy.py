@@ -47,9 +47,9 @@ def _get_stock_basic():
 		mycsr.execute("SELECT COUNT(*) FROM stocks")
 		cnt=mycsr.fetchone()[0]
 		if cnt>0:
-			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
 			rows=mycsr.fetchall()
-			df=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+			df=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
 			_basic_cache=df
 			mycsr.close();mdb.close()
 			return _basic_cache
@@ -69,11 +69,11 @@ def _get_stock_basic():
 			print('tushare API失败，st_execution_status状态为Y，从stocks表重试读取')
 			mdb=_connect_sm()
 			mycsr=mdb.cursor()
-			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
 			rows=mycsr.fetchall()
 			mycsr.close();mdb.close()
 			if rows:
-				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
 				return _basic_cache
 		print('tushare API失败且无成功执行记录: %s'%e)
 		raise
@@ -81,10 +81,10 @@ def _get_stock_basic():
 def _store_to_stocks(df):
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
-	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,fullname,list_date) VALUES(%s,%s,%s,%s,%s)"
+	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,name,fullname,list_date) VALUES(%s,%s,%s,%s,%s,%s)"
 	for i in range(len(df)):
 		try:
-			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].list_date))
+			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].fullname,df.iloc[i].list_date))
 		except Exception:
 			pass
 		if i%500==499:
@@ -561,6 +561,17 @@ def getlistgupiao(file):
 #========== 放量涨幅筛选（st_daily_signal）==========
 
 #创建 st_daily 表（汇总所有个股日线数据）
+def ensureStocksNameColumn():
+	"""给stocks表补上name(简称)列，已存在则跳过"""
+	try:
+		mdb=_connect_sm()
+		mycsr=mdb.cursor()
+		mycsr.execute("ALTER TABLE stocks ADD COLUMN name VARCHAR(50) DEFAULT '' AFTER symbol")
+		mdb.commit()
+		mycsr.close();mdb.close()
+	except Exception:
+		pass
+
 def createDailyTable():
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()

@@ -53,6 +53,7 @@ def is_a_share_trading_day(day=None):
 def run_all_strategies():
     """运行所有筛选策略，结果记录到日志"""
     logger.info("========== 全策略筛选开始 ==========")
+    sp.ensureStocksNameColumn()
 
     if not is_a_share_trading_day():
         logger.info("========== 非交易日，本次策略任务结束 ==========")

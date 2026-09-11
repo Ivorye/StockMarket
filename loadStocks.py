@@ -44,7 +44,7 @@ def _update_execution_status(task_name, status='Y'):
 def getStockBasic():
 	try:
 		pro = ts.pro_api(TUSHARE_TOKEN)
-		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,fullname,area,industry,list_date')
+		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,fullname,area,industry,list_date')
 		df=pd.DataFrame(data)
 		_store_to_stocks(df)
 		_update_execution_status('stock_basic','Y')
@@ -59,10 +59,10 @@ def getStockBasic():
 def _store_to_stocks(df):
 	db=connectDB()
 	cursor=db.cursor()
-	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,fullname,list_date) VALUES(%s,%s,%s,%s,%s)"
+	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,name,fullname,list_date) VALUES(%s,%s,%s,%s,%s,%s)"
 	for i in range(len(df)):
 		try:
-			cursor.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].fullname,df.iloc[i].list_date))
+			cursor.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].fullname,df.iloc[i].list_date))
 		except Exception:
 			pass
 		if i%500==499:
@@ -75,12 +75,12 @@ def _store_to_stocks(df):
 def getStockBasicFromDB():
 	db=connectDB()
 	cursor=db.cursor()
-	cursor.execute("SELECT symbol, st_code AS ts_code, fullname, fullname AS name, list_date FROM stocks")
+	cursor.execute("SELECT symbol, st_code AS ts_code, name, fullname, list_date FROM stocks")
 	rows = cursor.fetchall()
 	db.close()
 	if not rows:
 		return None
-	df = pd.DataFrame(rows, columns=['symbol','ts_code','fullname','name','list_date'])
+	df = pd.DataFrame(rows, columns=['symbol','ts_code','name','fullname','list_date'])
 	return df
 
 #获取stock_basic里面的股票列表，为每支股票创建历史记录表
@@ -101,12 +101,12 @@ def loadAllBasic(df=None):
 	for i in range(0,l):
 		symbol=df.loc[i].symbol
 		sql0="select count(*) from stocks where symbol=%s"
-		sql="insert into stocks(id,symbol,st_code,fullname,list_date) values(%s,%s,%s,%s,%s)"
+		sql="insert into stocks(id,symbol,st_code,name,fullname,list_date) values(%s,%s,%s,%s,%s,%s)"
 		cursor.execute(sql0, (symbol,))
 		quantity = cursor.fetchone()[0]
 		if quantity == 0:
 			try:
-				cursor.execute(sql, (i+1, df.loc[i].symbol, df.loc[i].ts_code, df.loc[i].fullname, df.loc[i].list_date))
+				cursor.execute(sql, (i+1, df.loc[i].symbol, df.loc[i].ts_code, df.loc[i].name, df.loc[i].fullname, df.loc[i].list_date))
 				if i % 50 == 0:
 					db.commit()
 					print(i, " records have been loaded to database")
