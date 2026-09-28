@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股策略筛选结果</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f0f2f5; color: #333; }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 24px; margin-bottom: 6px; }
+.meta { color: #888; font-size: 13px; margin-bottom: 20px; }
+.stats { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat-card { background: #fff; border-radius: 10px; padding: 18px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); min-width: 150px; text-align: center; cursor: pointer; transition: all 0.2s; border-left: 4px solid transparent; }
+.stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.stat-card.active { border-left-color: var(--accent); }
+.stat-card .label { font-size: 13px; color: #888; margin-bottom: 6px; }
+.stat-card .value { font-size: 32px; font-weight: 700; color: var(--accent); }
+.tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.tab { padding: 8px 20px; border: 1px solid #d9d9d9; border-radius: 20px; background: #fff; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+.tab:hover { border-color: var(--accent); color: var(--accent); }
+.tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.badge { background: rgba(255,255,255,0.3); padding: 1px 8px; border-radius: 10px; font-size: 12px; margin-left: 4px; }
+.tab.active .badge { background: rgba(255,255,255,0.3); }
+.panel { display: none; }
+.panel table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+th { background: #fafafa; padding: 12px 16px; text-align: left; font-size: 13px; color: #666; border-bottom: 1px solid #f0f0f0; position: sticky; top: 0; }
+td { padding: 11px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+tr:hover { background: #f6f8ff; }
+.red { color: #ff4d4f; font-weight: 600; }
+.green { color: #52c41a; }
+footer { margin-top: 32px; text-align: center; color: #aaa; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>A股策略筛选看板</h1>
+  <div class="meta">数据区间: 20260727 ~ 20260826 &nbsp;|&nbsp; 更新时间: 2026-08-26 23:21:32</div>
+  <div class="stats">
+    <div class="stat-card active" style="--accent: #ff4d4f" id="stat-巨量上涨" onclick="switchTab('巨量上涨')"><div class="label">巨量上涨</div><div class="value">28</div></div>
+    <div class="stat-card" style="--accent: #fa8c16" id="stat-向上跳空缺口" onclick="switchTab('向上跳空缺口')"><div class="label">向上跳空缺口</div><div class="value">32</div></div>
+    <div class="stat-card" style="--accent: #1677ff" id="stat-跳空上涨" onclick="switchTab('跳空上涨')"><div class="label">跳空上涨</div><div class="value">119</div></div>
+    <div class="stat-card" style="--accent: #52c41a" id="stat-放量日" onclick="switchTab('放量日')"><div class="label">放量日</div><div class="value">37</div></div>
+    <div class="stat-card" style="--accent: #722ed1" id="stat-区间涨幅30%" onclick="switchTab('区间涨幅30%')"><div class="label">区间涨幅30%</div><div class="value">171</div></div>
+  </div>
+  <div class="tabs">
+<button class="tab active" onclick="switchTab('巨量上涨')" id="tab-巨量上涨" style="--accent: #ff4d4f">巨量上涨 <span class="badge">28</span></button>
+<button class="tab" onclick="switchTab('向上跳空缺口')" id="tab-向上跳空缺口" style="--accent: #fa8c16">向上跳空缺口 <span class="badge">32</span></button>
+<button class="tab" onclick="switchTab('跳空上涨')" id="tab-跳空上涨" style="--accent: #1677ff">跳空上涨 <span class="badge">119</span></button>
+<button class="tab" onclick="switchTab('放量日')" id="tab-放量日" style="--accent: #52c41a">放量日 <span class="badge">37</span></button>
+<button class="tab" onclick="switchTab('区间涨幅30%')" id="tab-区间涨幅30%" style="--accent: #722ed1">区间涨幅30% <span class="badge">171</span></button>
+  </div>
+
+    <div id="panel-巨量上涨" class="panel" style="display: block">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>名称</th><th>信号日期</th><th>涨幅</th><th>量比</th></tr></thead>
+        <tbody><tr><td>1</td><td><strong>000048.SZ</strong></td><td>深圳市京基智</td><td>2026-08-05</td><td class="red">+6.81%</td><td>2.5</td></tr>
+<tr><td>2</td><td><strong>000752.SZ</strong></td><td>西藏发展股份</td><td>2026-08-05</td><td class="red">+7.29%</td><td>2.0</td></tr>
+<tr><td>3</td><td><strong>000831.SZ</strong></td><td>中国稀土集团</td><td>2026-08-14</td><td class="red">+10.00%</td><td>3.1</td></tr>
+<tr><td>4</td><td><strong>001228.SZ</strong></td><td>永泰运化工物</td><td>2026-08-21</td><td class="red">+5.74%</td><td>3.1</td></tr>
+<tr><td>5</td><td><strong>001301.SZ</strong></td><td>石家庄尚太科</td><td>2026-08-19</td><td class="red">+10.01%</td><td>3.2</td></tr>
+<tr><td>6</td><td><strong>002073.SZ</strong></td><td>软控股份有限</td><td>2026-08-21</td><td class="red">+4.21%</td><td>3.0</td></tr>
+<tr><td>7</td><td><strong>002368.SZ</strong></td><td>太极计算机股</td><td>2026-07-31</td><td class="red">+7.12%</td><td>2.2</td></tr>
+<tr><td>8</td><td><strong>002471.SZ</strong></td><td>江苏中超控股</td><td>2026-08-03</td><td class="red">+9.65%</td><td>5.4</td></tr>
+<tr><td>9</td><td><strong>002623.SZ</strong></td><td>常州亚玛顿股</td><td>2026-08-10</td><td class="red">+7.59%</td><td>2.2</td></tr>
+<tr><td>10</td><td><strong>002650.SZ</strong></td><td>加加食品集团</td><td>2026-07-30</td><td class="red">+7.72%</td><td>2.5</td></tr>
+<tr><td>11</td><td><strong>300076.SZ</strong></td><td>宁波GQY视</td><td>2026-08-10</td><td class="red">+10.33%</td><td>2.6</td></tr>
+<tr><td>12</td><td><strong>300093.SZ</strong></td><td>甘肃金刚光伏</td><td>2026-07-31</td><td class="red">+12.27%</td><td>2.3</td></tr>
+<tr><td>13</td><td><strong>300487.SZ</strong></td><td>西安蓝晓科技</td><td>2026-08-04</td><td class="red">+12.35%</td><td>2.4</td></tr>
+<tr><td>14</td><td><strong>300501.SZ</strong></td><td>上海海顺新型</td><td>2026-07-31</td><td class="red">+7.90%</td><td>2.5</td></tr>
+<tr><td>15</td><td><strong>300741.SZ</strong></td><td>华宝香精股份</td><td>2026-07-30</td><td class="red">+4.07%</td><td>2.4</td></tr>
+<tr><td>16</td><td><strong>300877.SZ</strong></td><td>安徽金春无纺</td><td>2026-08-18</td><td class="red">+12.75%</td><td>3.2</td></tr>
+<tr><td>17</td><td><strong>300878.SZ</strong></td><td>浙江维康药业</td><td>2026-07-31</td><td class="red">+10.34%</td><td>3.3</td></tr>
+<tr><td>18</td><td><strong>300915.SZ</strong></td><td>上海海融食品</td><td>2026-08-10</td><td class="red">+6.23%</td><td>2.1</td></tr>
+<tr><td>19</td><td><strong>300982.SZ</strong></td><td>苏文电能科技</td><td>2026-08-10</td><td class="red">+4.75%</td><td>2.6</td></tr>
+<tr><td>20</td><td><strong>300989.SZ</strong></td><td>深圳市蕾奥规</td><td>2026-08-13</td><td class="red">+6.36%</td><td>3.6</td></tr>
+<tr><td>21</td><td><strong>301160.SZ</strong></td><td>苏州翔楼新材</td><td>2026-08-14</td><td class="red">+18.49%</td><td>4.0</td></tr>
+<tr><td>22</td><td><strong>301185.SZ</strong></td><td>山东山大鸥玛</td><td>2026-07-31</td><td class="red">+5.18%</td><td>2.2</td></tr>
+<tr><td>23</td><td><strong>301328.SZ</strong></td><td>维峰电子(广</td><td>2026-08-10</td><td class="red">+13.28%</td><td>2.1</td></tr>
+<tr><td>24</td><td><strong>600525.SH</strong></td><td>长园科技集团</td><td>2026-08-17</td><td class="red">+7.30%</td><td>9.1</td></tr>
+<tr><td>25</td><td><strong>600546.SH</strong></td><td>山煤国际能源</td><td>2026-08-06</td><td class="red">+8.01%</td><td>3.6</td></tr>
+<tr><td>26</td><td><strong>600818.SH</strong></td><td>中路股份有限</td><td>2026-08-04</td><td class="red">+7.39%</td><td>8.5</td></tr>
+<tr><td>27</td><td><strong>603838.SH</strong></td><td>广东四通集团</td><td>2026-08-03</td><td class="red">+5.05%</td><td>8.5</td></tr>
+<tr><td>28</td><td><strong>603917.SH</strong></td><td>宁波合力科技</td><td>2026-08-10</td><td class="red">+7.22%</td><td>2.5</td></tr>
+</tbody>
+      </table>
+    </div>
+    
+    <div id="panel-向上跳空缺口" class="panel" style="display: none">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>名称</th><th>信号日期</th><th>涨幅</th><th>量比</th></tr></thead>
+        <tbody><tr><td>1</td><td><strong>000027.SZ</strong></td><td>深圳能源集团</td><td>2026-08-26</td><td class="red">+3.89%</td><td>3.4</td></tr>
+<tr><td>2</td><td><strong>000581.SZ</strong></td><td>无锡威孚高科</td><td>2026-08-26</td><td class="red">+4.63%</td><td>7.0</td></tr>
+<tr><td>3</td><td><strong>000632.SZ</strong></td><td>福建三木集团</td><td>2026-08-26</td><td class="red">+9.89%</td><td>1.1</td></tr>
+<tr><td>4</td><td><strong>000650.SZ</strong></td><td>仁和药业股份</td><td>2026-08-26</td><td class="red">+0.55%</td><td>1.6</td></tr>
+<tr><td>5</td><td><strong>000733.SZ</strong></td><td>中国振华(集</td><td>2026-08-26</td><td class="red">+0.81%</td><td>1.5</td></tr>
+<tr><td>6</td><td><strong>000969.SZ</strong></td><td>安泰科技股份</td><td>2026-08-26</td><td class="red">+1.38%</td><td>1.6</td></tr>
+<tr><td>7</td><td><strong>000997.SZ</strong></td><td>新大陆数字技</td><td>2026-08-26</td><td class="red">+9.99%</td><td>3.9</td></tr>
+<tr><td>8</td><td><strong>002007.SZ</strong></td><td>华兰生物工程</td><td>2026-08-26</td><td class="red">+1.07%</td><td>1.2</td></tr>
+<tr><td>9</td><td><strong>002034.SZ</strong></td><td>旺能环境股份</td><td>2026-08-26</td><td class="red">+4.90%</td><td>3.2</td></tr>
+<tr><td>10</td><td><strong>002078.SZ</strong></td><td>山东太阳纸业</td><td>2026-08-26</td><td class="red">+8.79%</td><td>8.4</td></tr>
+<tr><td>11</td><td><strong>002084.SZ</strong></td><td>广州海鸥住宅</td><td>2026-08-26</td><td class="red">+10.11%</td><td>1.3</td></tr>
+<tr><td>12</td><td><strong>002366.SZ</strong></td><td>融发核电设备</td><td>2026-08-26</td><td class="red">+10.05%</td><td>4.2</td></tr>
+<tr><td>13</td><td><strong>002418.SZ</strong></td><td>浙江康盛股份</td><td>2026-08-26</td><td class="red">+10.12%</td><td>1.3</td></tr>
+<tr><td>14</td><td><strong>002430.SZ</strong></td><td>杭氧集团股份</td><td>2026-08-26</td><td class="red">+3.92%</td><td>2.3</td></tr>
+<tr><td>15</td><td><strong>002667.SZ</strong></td><td>威领新能源股</td><td>2026-08-21</td><td class="red">+10.02%</td><td>47.0</td></tr>
+<tr><td>16</td><td><strong>002686.SZ</strong></td><td>浙江亿利达风</td><td>2026-08-21</td><td class="red">+9.98%</td><td>3.3</td></tr>
+<tr><td>17</td><td><strong>002743.SZ</strong></td><td>安徽富煌钢构</td><td>2026-08-21</td><td class="red">+4.07%</td><td>1.7</td></tr>
+<tr><td>18</td><td><strong>002903.SZ</strong></td><td>宇环数控机床</td><td>2026-08-21</td><td class="red">+10.01%</td><td>1.2</td></tr>
+<tr><td>19</td><td><strong>002997.SZ</strong></td><td>瑞鹄汽车模具</td><td>2026-08-21</td><td class="red">+3.57%</td><td>1.8</td></tr>
+<tr><td>20</td><td><strong>003040.SZ</strong></td><td>楚天龙股份有</td><td>2026-08-21</td><td class="red">+9.97%</td><td>1.0</td></tr>
+<tr><td>21</td><td><strong>300142.SZ</strong></td><td>云南沃森生物</td><td>2026-08-21</td><td class="red">+6.48%</td><td>7.6</td></tr>
+<tr><td>22</td><td><strong>300399.SZ</strong></td><td>江西天利科技</td><td>2026-08-21</td><td class="red">+10.51%</td><td>7.3</td></tr>
+<tr><td>23</td><td><strong>600335.SH</strong></td><td>国机汽车股份</td><td>2026-08-21</td><td class="red">+4.37%</td><td>6.5</td></tr>
+<tr><td>24</td><td><strong>600368.SH</strong></td><td>广西五洲交通</td><td>2026-08-21</td><td class="red">+1.52%</td><td>4.6</td></tr>
+<tr><td>25</td><td><strong>600785.SH</strong></td><td>银川新华百货</td><td>2026-08-21</td><td class="red">+10.06%</td><td>0.8</td></tr>
+<tr><td>26</td><td><strong>601177.SH</strong></td><td>杭州前进齿轮</td><td>2026-08-21</td><td class="red">+10.02%</td><td>2.4</td></tr>
+<tr><td>27</td><td><strong>603123.SH</strong></td><td>北京翠微大厦</td><td>2026-08-21</td><td class="red">+2.49%</td><td>1.1</td></tr>
+<tr><td>28</td><td><strong>603333.SH</strong></td><td>尚纬股份有限</td><td>2026-08-21</td><td class="red">+10.06%</td><td>1.1</td></tr>
+<tr><td>29</td><td><strong>603626.SH</strong></td><td>昆山科森科技</td><td>2026-08-21</td><td class="red">+10.03%</td><td>0.9</td></tr>
+<tr><td>30</td><td><strong>603828.SH</strong></td><td>苏州柯利达装</td><td>2026-08-21</td><td class="red">+4.22%</td><td>1.8</td></tr>
+<tr><td>31</td><td><strong>603958.SH</strong></td><td>哈森商贸(中</td><td>2026-08-21</td><td class="red">+10.01%</td><td>0.9</td></tr>
+<tr><td>32</td><td><strong>605090.SH</strong></td><td>江西九丰能源</td><td>2026-08-14</td><td class="red">+5.95%</td><td>2.2</td></tr>
+</tbody>
+      </table>
+    </div>
+    
+    <div id="panel-跳空上涨" class="panel" style="display: none">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>名称</th><th>信号日期</th><th>涨幅</th><th>量比</th></tr></thead>
+        <tbody><tr><td>1</td><td><strong>000017.SZ</strong></td><td>深圳中华自行</td><td>2026-08-25</td><td class="red">+9.97%</td><td>6.5</td></tr>
+<tr><td>2</td><td><strong>000428.SZ</strong></td><td>华天酒店集团</td><td>2026-08-26</td><td class="red">+9.95%</td><td>2.6</td></tr>
+<tr><td>3</td><td><strong>000505.SZ</strong></td><td>海南京粮控股</td><td>2026-08-19</td><td class="red">+10.01%</td><td>0.9</td></tr>
+<tr><td>4</td><td><strong>000506.SZ</strong></td><td>中润资源投资</td><td>2026-08-06</td><td class="red">+5.51%</td><td>1.0</td></tr>
+<tr><td>5</td><td><strong>000593.SZ</strong></td><td>德龙汇能集团</td><td>2026-08-05</td><td class="red">+10.01%</td><td>18.0</td></tr>
+<tr><td>6</td><td><strong>000603.SZ</strong></td><td>盛达金属资源</td><td>2026-08-24</td><td class="red">+8.88%</td><td>1.3</td></tr>
+<tr><td>7</td><td><strong>000632.SZ</strong></td><td>福建三木集团</td><td>2026-08-26</td><td class="red">+9.89%</td><td>1.1</td></tr>
+<tr><td>8</td><td><strong>000826.SZ</strong></td><td>启迪环境科技</td><td>2026-08-03</td><td class="red">+5.78%</td><td>1.2</td></tr>
+<tr><td>9</td><td><strong>000931.SZ</strong></td><td>北京中关村科</td><td>2026-08-24</td><td class="red">+10.02%</td><td>1.8</td></tr>
+<tr><td>10</td><td><strong>001210.SZ</strong></td><td>金房能源集团</td><td>2026-08-18</td><td class="red">+8.02%</td><td>1.3</td></tr>
+<tr><td>11</td><td><strong>001223.SZ</strong></td><td>欧克科技股份</td><td>2026-08-07</td><td class="red">+9.99%</td><td>0.9</td></tr>
+<tr><td>12</td><td><strong>001230.SZ</strong></td><td>劲旅环境科技</td><td>2026-08-24</td><td class="red">+9.29%</td><td>4.0</td></tr>
+<tr><td>13</td><td><strong>001268.SZ</strong></td><td>广东扬山联合</td><td>2026-08-13</td><td class="red">+1.33%</td><td>2.7</td></tr>
+<tr><td>14</td><td><strong>001326.SZ</strong></td><td>深圳市联域光</td><td>2026-08-05</td><td class="red">+5.85%</td><td>1.6</td></tr>
+<tr><td>15</td><td><strong>001337.SZ</strong></td><td>四川容大黄金</td><td>2026-08-17</td><td class="red">+3.39%</td><td>0.9</td></tr>
+<tr><td>16</td><td><strong>002081.SZ</strong></td><td>苏州金螳螂建</td><td>2026-08-17</td><td class="red">+10.02%</td><td>0.9</td></tr>
+<tr><td>17</td><td><strong>002084.SZ</strong></td><td>广州海鸥住宅</td><td>2026-08-26</td><td class="red">+10.11%</td><td>1.3</td></tr>
+<tr><td>18</td><td><strong>002172.SZ</strong></td><td>江苏澳洋健康</td><td>2026-08-25</td><td class="red">+4.05%</td><td>1.9</td></tr>
+<tr><td>19</td><td><strong>002357.SZ</strong></td><td>四川富临运业</td><td>2026-08-13</td><td class="red">+4.00%</td><td>3.3</td></tr>
+<tr><td>20</td><td><strong>002388.SZ</strong></td><td>新亚制程(浙</td><td>2026-08-10</td><td class="red">+9.96%</td><td>1.0</td></tr>
+<tr><td>21</td><td><strong>002412.SZ</strong></td><td>湖南汉森制药</td><td>2026-08-25</td><td class="red">+9.99%</td><td>2.9</td></tr>
+<tr><td>22</td><td><strong>002418.SZ</strong></td><td>浙江康盛股份</td><td>2026-08-26</td><td class="red">+10.12%</td><td>1.3</td></tr>
+<tr><td>23</td><td><strong>002437.SZ</strong></td><td>哈尔滨誉衡药</td><td>2026-08-10</td><td class="red">+9.94%</td><td>2.0</td></tr>
+<tr><td>24</td><td><strong>002491.SZ</strong></td><td>通鼎互联信息</td><td>2026-08-21</td><td class="red">+10.02%</td><td>1.6</td></tr>
+<tr><td>25</td><td><strong>002552.SZ</strong></td><td>宝鼎科技股份</td><td>2026-08-11</td><td class="red">+4.30%</td><td>2.3</td></tr>
+<tr><td>26</td><td><strong>002586.SZ</strong></td><td>浙江省围海建</td><td>2026-08-13</td><td class="red">+6.10%</td><td>2.4</td></tr>
+<tr><td>27</td><td><strong>002655.SZ</strong></td><td>共达电声股份</td><td>2026-08-05</td><td class="red">+10.00%</td><td>0.8</td></tr>
+<tr><td>28</td><td><strong>002667.SZ</strong></td><td>威领新能源股</td><td>2026-08-21</td><td class="red">+10.02%</td><td>47.0</td></tr>
+<tr><td>29</td><td><strong>002716.SZ</strong></td><td>郴州市金贵银</td><td>2026-08-17</td><td class="red">+6.63%</td><td>1.3</td></tr>
+<tr><td>30</td><td><strong>002743.SZ</strong></td><td>安徽富煌钢构</td><td>2026-08-21</td><td class="red">+4.07%</td><td>1.7</td></tr>
+<tr><td>31</td><td><strong>002827.SZ</strong></td><td>西藏高争民爆</td><td>2026-08-10</td><td class="red">+10.01%</td><td>0.6</td></tr>
+<tr><td>32</td><td><strong>002903.SZ</strong></td><td>宇环数控机床</td><td>2026-08-21</td><td class="red">+10.01%</td><td>1.2</td></tr>
+<tr><td>33</td><td><strong>002951.SZ</strong></td><td>四川金时科技</td><td>2026-07-28</td><td class="red">+4.31%</td><td>3.1</td></tr>
+<tr><td>34</td><td><strong>003031.SZ</strong></td><td>河北中瓷电子</td><td>2026-08-17</td><td class="red">+10.00%</td><td>1.3</td></tr>
+<tr><td>35</td><td><strong>003032.SZ</strong></td><td>江苏传智播客</td><td>2026-08-05</td><td class="red">+10.04%</td><td>1.8</td></tr>
+<tr><td>36</td><td><strong>300016.SZ</strong></td><td>北京北陆药业</td><td>2026-08-04</td><td class="red">+2.04%</td><td>1.4</td></tr>
+<tr><td>37</td><td><strong>300139.SZ</strong></td><td>北京晓程科技</td><td>2026-08-20</td><td class="red">+5.93%</td><td>1.3</td></tr>
+<tr><td>38</td><td><strong>300142.SZ</strong></td><td>云南沃森生物</td><td>2026-08-21</td><td class="red">+6.48%</td><td>7.6</td></tr>
+<tr><td>39</td><td><strong>300154.SZ</strong></td><td>深圳市瑞凌实</td><td>2026-08-06</td><td class="red">+3.30%</td><td>1.3</td></tr>
+<tr><td>40</td><td><strong>300189.SZ</strong></td><td>海南神农科技</td><td>2026-08-17</td><td class="red">+11.13%</td><td>3.5</td></tr>
+<tr><td>41</td><td><strong>300192.SZ</strong></td><td>苏州科德教育</td><td>2026-07-29</td><td class="red">+3.22%</td><td>2.9</td></tr>
+<tr><td>42</td><td><strong>300227.SZ</strong></td><td>深圳光韵达光</td><td>2026-08-05</td><td class="red">+5.98%</td><td>1.7</td></tr>
+<tr><td>43</td><td><strong>300290.SZ</strong></td><td>荣科科技股份</td><td>2026-07-28</td><td class="red">+19.90%</td><td>3.3</td></tr>
+<tr><td>44</td><td><strong>300313.SZ</strong></td><td>新疆天山畜牧</td><td>2026-08-19</td><td class="red">+12.19%</td><td>4.1</td></tr>
+<tr><td>45</td><td><strong>300314.SZ</strong></td><td>宁波戴维医疗</td><td>2026-08-18</td><td class="red">+4.14%</td><td>1.8</td></tr>
+<tr><td>46</td><td><strong>300333.SZ</strong></td><td>深圳兆日科技</td><td>2026-08-14</td><td class="red">+6.01%</td><td>26.9</td></tr>
+<tr><td>47</td><td><strong>300363.SZ</strong></td><td>重庆博腾制药</td><td>2026-08-10</td><td class="red">+5.92%</td><td>1.2</td></tr>
+<tr><td>48</td><td><strong>300394.SZ</strong></td><td>苏州天孚光通</td><td>2026-08-17</td><td class="red">+7.04%</td><td>1.2</td></tr>
+<tr><td>49</td><td><strong>300404.SZ</strong></td><td>博济医药科技</td><td>2026-08-14</td><td class="red">+20.00%</td><td>1.3</td></tr>
+<tr><td>50</td><td><strong>300534.SZ</strong></td><td>甘肃陇神戎发</td><td>2026-07-28</td><td class="red">+6.18%</td><td>1.4</td></tr>
+<tr><td>51</td><td><strong>300535.SZ</strong></td><td>四川达威科技</td><td>2026-08-17</td><td class="red">+10.09%</td><td>6.1</td></tr>
+<tr><td>52</td><td><strong>300545.SZ</strong></td><td>深圳市联得自</td><td>2026-07-28</td><td class="red">+2.57%</td><td>1.7</td></tr>
+<tr><td>53</td><td><strong>300560.SZ</strong></td><td>中富通集团股</td><td>2026-08-04</td><td class="red">+9.80%</td><td>2.0</td></tr>
+<tr><td>54</td><td><strong>300570.SZ</strong></td><td>深圳太辰光通</td><td>2026-08-17</td><td class="red">+20.00%</td><td>1.1</td></tr>
+<tr><td>55</td><td><strong>300615.SZ</strong></td><td>深圳市欣天科</td><td>2026-08-06</td><td class="red">+19.97%</td><td>10.7</td></tr>
+<tr><td>56</td><td><strong>300684.SZ</strong></td><td>北京中石伟业</td><td>2026-08-18</td><td class="red">+20.00%</td><td>13.8</td></tr>
+<tr><td>57</td><td><strong>300725.SZ</strong></td><td>南京药石科技</td><td>2026-08-10</td><td class="red">+4.44%</td><td>1.1</td></tr>
+<tr><td>58</td><td><strong>300765.SZ</strong></td><td>石药创新制药</td><td>2026-08-20</td><td class="red">+20.00%</td><td>2.6</td></tr>
+<tr><td>59</td><td><strong>300862.SZ</strong></td><td>安徽蓝盾光电</td><td>2026-08-17</td><td class="red">+15.82%</td><td>0.6</td></tr>
+<tr><td>60</td><td><strong>300865.SZ</strong></td><td>成都大宏立机</td><td>2026-08-14</td><td class="red">+5.97%</td><td>2.5</td></tr>
+<tr><td>61</td><td><strong>300877.SZ</strong></td><td>安徽金春无纺</td><td>2026-08-18</td><td class="red">+12.75%</td><td>3.2</td></tr>
+<tr><td>62</td><td><strong>300927.SZ</strong></td><td>南通江天化学</td><td>2026-08-10</td><td class="red">+6.42%</td><td>2.8</td></tr>
+<tr><td>63</td><td><strong>300931.SZ</strong></td><td>通用电梯股份</td><td>2026-08-13</td><td class="red">+14.63%</td><td>5.6</td></tr>
+<tr><td>64</td><td><strong>300935.SZ</strong></td><td>北京盈建科软</td><td>2026-08-04</td><td class="red">+15.21%</td><td>1.8</td></tr>
+<tr><td>65</td><td><strong>300981.SZ</strong></td><td>中红普林医疗</td><td>2026-07-30</td><td class="red">+10.35%</td><td>9.7</td></tr>
+<tr><td>66</td><td><strong>300989.SZ</strong></td><td>深圳市蕾奥规</td><td>2026-08-13</td><td class="red">+6.36%</td><td>3.6</td></tr>
+<tr><td>67</td><td><strong>301047.SZ</strong></td><td>北京义翘神州</td><td>2026-08-10</td><td class="red">+5.31%</td><td>1.4</td></tr>
+<tr><td>68</td><td><strong>301080.SZ</strong></td><td>北京百普赛斯</td><td>2026-08-10</td><td class="red">+20.00%</td><td>2.0</td></tr>
+<tr><td>69</td><td><strong>301106.SZ</strong></td><td>江苏骏成电子</td><td>2026-08-19</td><td class="red">+20.02%</td><td>4.0</td></tr>
+<tr><td>70</td><td><strong>301129.SZ</strong></td><td>瑞纳智能设备</td><td>2026-08-18</td><td class="red">+20.00%</td><td>3.2</td></tr>
+<tr><td>71</td><td><strong>301183.SZ</strong></td><td>湖北东田微科</td><td>2026-08-10</td><td class="red">+5.73%</td><td>1.6</td></tr>
+<tr><td>72</td><td><strong>301209.SZ</strong></td><td>龙口联合化学</td><td>2026-08-11</td><td class="red">+15.04%</td><td>2.8</td></tr>
+<tr><td>73</td><td><strong>301227.SZ</strong></td><td>哈尔滨森鹰窗</td><td>2026-08-05</td><td class="red">+7.22%</td><td>1.3</td></tr>
+<tr><td>74</td><td><strong>301230.SZ</strong></td><td>上海泓博智源</td><td>2026-08-10</td><td class="red">+8.27%</td><td>1.5</td></tr>
+<tr><td>75</td><td><strong>301251.SZ</strong></td><td>江西威尔高电</td><td>2026-08-07</td><td class="red">+16.95%</td><td>1.8</td></tr>
+<tr><td>76</td><td><strong>301282.SZ</strong></td><td>金禄电子科技</td><td>2026-08-18</td><td class="red">+11.06%</td><td>1.5</td></tr>
+<tr><td>77</td><td><strong>301366.SZ</strong></td><td>深圳市一博科</td><td>2026-08-03</td><td class="red">+7.81%</td><td>2.0</td></tr>
+<tr><td>78</td><td><strong>301419.SZ</strong></td><td>上海阿莱德实</td><td>2026-08-17</td><td class="red">+10.45%</td><td>1.6</td></tr>
+<tr><td>79</td><td><strong>301516.SZ</strong></td><td>深圳市核达中</td><td>2026-08-19</td><td class="red">+3.60%</td><td>1.0</td></tr>
+<tr><td>80</td><td><strong>600127.SH</strong></td><td>金健米业股份</td><td>2026-08-20</td><td class="red">+9.97%</td><td>9.5</td></tr>
+<tr><td>81</td><td><strong>600162.SH</strong></td><td>深圳香江控股</td><td>2026-08-12</td><td class="red">+10.02%</td><td>1.8</td></tr>
+<tr><td>82</td><td><strong>600165.SH</strong></td><td>宁夏中科生物</td><td>2026-08-18</td><td class="red">+10.11%</td><td>0.8</td></tr>
+<tr><td>83</td><td><strong>600186.SH</strong></td><td>莲花健康产业</td><td>2026-08-17</td><td class="red">+9.23%</td><td>1.7</td></tr>
+<tr><td>84</td><td><strong>600272.SH</strong></td><td>上海开开实业</td><td>2026-08-11</td><td class="red">+10.02%</td><td>8.2</td></tr>
+<tr><td>85</td><td><strong>600353.SH</strong></td><td>成都旭光电子</td><td>2026-08-18</td><td class="red">+9.99%</td><td>2.0</td></tr>
+<tr><td>86</td><td><strong>600379.SH</strong></td><td>陕西宝光真空</td><td>2026-08-04</td><td class="red">+9.97%</td><td>2.2</td></tr>
+<tr><td>87</td><td><strong>600547.SH</strong></td><td>山东黄金矿业</td><td>2026-08-20</td><td class="red">+8.59%</td><td>1.0</td></tr>
+<tr><td>88</td><td><strong>600613.SH</strong></td><td>上海神奇制药</td><td>2026-08-18</td><td class="red">+10.07%</td><td>1.8</td></tr>
+<tr><td>89</td><td><strong>600629.SH</strong></td><td>华东建筑集团</td><td>2026-07-28</td><td class="red">+9.99%</td><td>1.5</td></tr>
+<tr><td>90</td><td><strong>600664.SH</strong></td><td>哈药集团股份</td><td>2026-08-11</td><td class="red">+9.97%</td><td>5.2</td></tr>
+<tr><td>91</td><td><strong>600721.SH</strong></td><td>新疆百花村医</td><td>2026-08-12</td><td class="red">+10.04%</td><td>2.0</td></tr>
+<tr><td>92</td><td><strong>600722.SH</strong></td><td>河北金牛化工</td><td>2026-07-30</td><td class="red">+6.77%</td><td>2.2</td></tr>
+<tr><td>93</td><td><strong>600815.SH</strong></td><td>厦门厦工机械</td><td>2026-08-04</td><td class="red">+9.06%</td><td>1.8</td></tr>
+<tr><td>94</td><td><strong>601069.SH</strong></td><td>西部黄金股份</td><td>2026-08-20</td><td class="red">+4.89%</td><td>1.1</td></tr>
+<tr><td>95</td><td><strong>601579.SH</strong></td><td>会稽山绍兴酒</td><td>2026-08-14</td><td class="red">+7.05%</td><td>3.0</td></tr>
+<tr><td>96</td><td><strong>601609.SH</strong></td><td>宁波金田铜业</td><td>2026-08-17</td><td class="red">+6.94%</td><td>2.3</td></tr>
+<tr><td>97</td><td><strong>601700.SH</strong></td><td>常熟风范电力</td><td>2026-08-21</td><td class="green">-6.53%</td><td>2.5</td></tr>
+<tr><td>98</td><td><strong>601886.SH</strong></td><td>江河创建集团</td><td>2026-08-12</td><td class="red">+9.97%</td><td>1.1</td></tr>
+<tr><td>99</td><td><strong>603036.SH</strong></td><td>江苏如通石油</td><td>2026-08-20</td><td class="red">+10.01%</td><td>1.8</td></tr>
+<tr><td>100</td><td><strong>603039.SH</strong></td><td>泛微网络科技</td><td>2026-08-03</td><td class="red">+6.07%</td><td>2.5</td></tr>
+<tr><td>101</td><td><strong>603079.SH</strong></td><td>浙江圣达生物</td><td>2026-08-17</td><td class="red">+9.99%</td><td>0.6</td></tr>
+<tr><td>102</td><td><strong>603151.SH</strong></td><td>山东邦基科技</td><td>2026-08-11</td><td class="red">+2.62%</td><td>2.7</td></tr>
+<tr><td>103</td><td><strong>603156.SH</strong></td><td>河北养元智汇</td><td>2026-07-31</td><td class="red">+3.69%</td><td>1.0</td></tr>
+<tr><td>104</td><td><strong>603217.SH</strong></td><td>元利化学集团</td><td>2026-08-07</td><td class="red">+9.14%</td><td>2.0</td></tr>
+<tr><td>105</td><td><strong>603221.SH</strong></td><td>爱丽家居科技</td><td>2026-08-18</td><td class="red">+10.01%</td><td>1.0</td></tr>
+<tr><td>106</td><td><strong>603259.SH</strong></td><td>无锡药明康德</td><td>2026-08-10</td><td class="red">+4.21%</td><td>1.4</td></tr>
+<tr><td>107</td><td><strong>603330.SH</strong></td><td>天洋新材(上</td><td>2026-08-17</td><td class="red">+10.02%</td><td>0.5</td></tr>
+<tr><td>108</td><td><strong>603358.SH</strong></td><td>华达汽车科技</td><td>2026-08-17</td><td class="red">+6.49%</td><td>1.3</td></tr>
+<tr><td>109</td><td><strong>603580.SH</strong></td><td>艾艾精密工业</td><td>2026-08-18</td><td class="red">+10.00%</td><td>0.8</td></tr>
+<tr><td>110</td><td><strong>603626.SH</strong></td><td>昆山科森科技</td><td>2026-08-21</td><td class="red">+10.03%</td><td>0.9</td></tr>
+<tr><td>111</td><td><strong>603655.SH</strong></td><td>常州朗博密封</td><td>2026-08-10</td><td class="red">+2.26%</td><td>4.1</td></tr>
+<tr><td>112</td><td><strong>603682.SH</strong></td><td>上海锦和商业</td><td>2026-08-03</td><td class="red">+10.00%</td><td>1.4</td></tr>
+<tr><td>113</td><td><strong>603758.SH</strong></td><td>重庆秦安机电</td><td>2026-08-13</td><td class="red">+10.04%</td><td>1.9</td></tr>
+<tr><td>114</td><td><strong>603801.SH</strong></td><td>志邦家居股份</td><td>2026-08-21</td><td class="green">-3.87%</td><td>3.5</td></tr>
+<tr><td>115</td><td><strong>603838.SH</strong></td><td>广东四通集团</td><td>2026-08-03</td><td class="red">+5.05%</td><td>8.5</td></tr>
+<tr><td>116</td><td><strong>603880.SH</strong></td><td>江苏南方卫材</td><td>2026-08-18</td><td class="red">+6.22%</td><td>1.7</td></tr>
+<tr><td>117</td><td><strong>603958.SH</strong></td><td>哈森商贸(中</td><td>2026-08-21</td><td class="red">+10.01%</td><td>0.9</td></tr>
+<tr><td>118</td><td><strong>605179.SH</strong></td><td>浙江一鸣食品</td><td>2026-08-13</td><td class="red">+10.00%</td><td>0.9</td></tr>
+<tr><td>119</td><td><strong>605286.SH</strong></td><td>江苏同力日升</td><td>2026-08-13</td><td class="red">+10.00%</td><td>0.9</td></tr>
+</tbody>
+      </table>
+    </div>
+    
+    <div id="panel-放量日" class="panel" style="display: none">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>名称</th><th>信号日期</th><th>涨幅</th><th>量比</th></tr></thead>
+        <tbody><tr><td>1</td><td><strong>000010.SZ</strong></td><td>深圳美丽生态</td><td>2026-08-26</td><td class="red">+7.19%</td><td>3.1</td></tr>
+<tr><td>2</td><td><strong>000027.SZ</strong></td><td>深圳能源集团</td><td>2026-08-26</td><td class="red">+3.89%</td><td>3.4</td></tr>
+<tr><td>3</td><td><strong>000581.SZ</strong></td><td>无锡威孚高科</td><td>2026-08-26</td><td class="red">+4.63%</td><td>7.0</td></tr>
+<tr><td>4</td><td><strong>000750.SZ</strong></td><td>国海证券股份</td><td>2026-08-26</td><td class="red">+2.96%</td><td>3.8</td></tr>
+<tr><td>5</td><td><strong>000783.SZ</strong></td><td>长江证券股份</td><td>2026-08-26</td><td class="red">+5.58%</td><td>3.2</td></tr>
+<tr><td>6</td><td><strong>000796.SZ</strong></td><td>凯撒同盛发展</td><td>2026-08-26</td><td class="red">+0.48%</td><td>3.9</td></tr>
+<tr><td>7</td><td><strong>000997.SZ</strong></td><td>新大陆数字技</td><td>2026-08-26</td><td class="red">+9.99%</td><td>3.9</td></tr>
+<tr><td>8</td><td><strong>002034.SZ</strong></td><td>旺能环境股份</td><td>2026-08-26</td><td class="red">+4.90%</td><td>3.2</td></tr>
+<tr><td>9</td><td><strong>002072.SZ</strong></td><td>凯瑞德控股股</td><td>2026-08-26</td><td class="red">+10.07%</td><td>6.3</td></tr>
+<tr><td>10</td><td><strong>002078.SZ</strong></td><td>山东太阳纸业</td><td>2026-08-26</td><td class="red">+8.79%</td><td>8.4</td></tr>
+<tr><td>11</td><td><strong>002327.SZ</strong></td><td>深圳市富安娜</td><td>2026-08-26</td><td class="green">-4.93%</td><td>4.3</td></tr>
+<tr><td>12</td><td><strong>002366.SZ</strong></td><td>融发核电设备</td><td>2026-08-26</td><td class="red">+10.05%</td><td>4.2</td></tr>
+<tr><td>13</td><td><strong>002395.SZ</strong></td><td>无锡双象超纤</td><td>2026-08-26</td><td class="red">+4.42%</td><td>3.2</td></tr>
+<tr><td>14</td><td><strong>002445.SZ</strong></td><td>中南红文化集</td><td>2026-08-26</td><td class="green">-2.96%</td><td>71.0</td></tr>
+<tr><td>15</td><td><strong>002500.SZ</strong></td><td>山西证券股份</td><td>2026-08-26</td><td class="red">+3.39%</td><td>3.4</td></tr>
+<tr><td>16</td><td><strong>002667.SZ</strong></td><td>威领新能源股</td><td>2026-08-21</td><td class="red">+10.02%</td><td>47.0</td></tr>
+<tr><td>17</td><td><strong>002686.SZ</strong></td><td>浙江亿利达风</td><td>2026-08-21</td><td class="red">+9.98%</td><td>3.3</td></tr>
+<tr><td>18</td><td><strong>002802.SZ</strong></td><td>无锡洪汇新材</td><td>2026-08-21</td><td class="red">+6.44%</td><td>3.2</td></tr>
+<tr><td>19</td><td><strong>300016.SZ</strong></td><td>北京北陆药业</td><td>2026-08-21</td><td class="red">+20.00%</td><td>3.7</td></tr>
+<tr><td>20</td><td><strong>300128.SZ</strong></td><td>苏州锦富技术</td><td>2026-08-21</td><td class="red">+12.50%</td><td>3.7</td></tr>
+<tr><td>21</td><td><strong>300142.SZ</strong></td><td>云南沃森生物</td><td>2026-08-21</td><td class="red">+6.48%</td><td>7.6</td></tr>
+<tr><td>22</td><td><strong>300180.SZ</strong></td><td>上海华峰超纤</td><td>2026-08-21</td><td class="red">+7.09%</td><td>6.5</td></tr>
+<tr><td>23</td><td><strong>300340.SZ</strong></td><td>江门市科恒实</td><td>2026-08-21</td><td class="red">+4.14%</td><td>3.9</td></tr>
+<tr><td>24</td><td><strong>300399.SZ</strong></td><td>江西天利科技</td><td>2026-08-21</td><td class="red">+10.51%</td><td>7.3</td></tr>
+<tr><td>25</td><td><strong>300588.SZ</strong></td><td>新疆熙菱信息</td><td>2026-08-21</td><td class="red">+11.47%</td><td>3.8</td></tr>
+<tr><td>26</td><td><strong>300716.SZ</strong></td><td>广东泉为科技</td><td>2026-08-21</td><td class="red">+17.61%</td><td>3.8</td></tr>
+<tr><td>27</td><td><strong>300839.SZ</strong></td><td>宁波博汇化工</td><td>2026-08-21</td><td class="red">+20.02%</td><td>4.0</td></tr>
+<tr><td>28</td><td><strong>301119.SZ</strong></td><td>杭州正强传动</td><td>2026-08-21</td><td class="red">+6.30%</td><td>3.5</td></tr>
+<tr><td>29</td><td><strong>600187.SH</strong></td><td>黑龙江国中水</td><td>2026-08-21</td><td class="red">+5.30%</td><td>3.0</td></tr>
+<tr><td>30</td><td><strong>600335.SH</strong></td><td>国机汽车股份</td><td>2026-08-21</td><td class="red">+4.37%</td><td>6.5</td></tr>
+<tr><td>31</td><td><strong>600368.SH</strong></td><td>广西五洲交通</td><td>2026-08-21</td><td class="red">+1.52%</td><td>4.6</td></tr>
+<tr><td>32</td><td><strong>600476.SH</strong></td><td>湖南湘邮科技</td><td>2026-08-21</td><td class="red">+3.42%</td><td>3.2</td></tr>
+<tr><td>33</td><td><strong>603088.SH</strong></td><td>宁波精达成形</td><td>2026-08-21</td><td class="red">+8.22%</td><td>3.9</td></tr>
+<tr><td>34</td><td><strong>603590.SH</strong></td><td>北京康辰药业</td><td>2026-08-21</td><td class="green">-6.18%</td><td>4.0</td></tr>
+<tr><td>35</td><td><strong>603801.SH</strong></td><td>志邦家居股份</td><td>2026-08-21</td><td class="green">-3.87%</td><td>3.5</td></tr>
+<tr><td>36</td><td><strong>605008.SH</strong></td><td>宁波长鸿高分</td><td>2026-08-14</td><td class="red">+3.01%</td><td>3.1</td></tr>
+<tr><td>37</td><td><strong>605286.SH</strong></td><td>江苏同力日升</td><td>2026-08-14</td><td class="green">-10.00%</td><td>8.2</td></tr>
+</tbody>
+      </table>
+    </div>
+    
+    <div id="panel-区间涨幅30%" class="panel" style="display: none">
+      <table>
+        <thead><tr><th>#</th><th>代码</th><th>名称</th><th>信号日期</th><th>涨幅</th><th>量比</th></tr></thead>
+        <tbody><tr><td>1</td><td><strong>000007.SZ</strong></td><td>深圳市全新好</td><td>2026-08-26</td><td class="red">+35.34%</td><td>-</td></tr>
+<tr><td>2</td><td><strong>000017.SZ</strong></td><td>深圳中华自行</td><td>2026-08-26</td><td class="red">+60.61%</td><td>-</td></tr>
+<tr><td>3</td><td><strong>000428.SZ</strong></td><td>华天酒店集团</td><td>2026-08-26</td><td class="red">+42.22%</td><td>-</td></tr>
+<tr><td>4</td><td><strong>000505.SZ</strong></td><td>海南京粮控股</td><td>2026-08-26</td><td class="red">+30.73%</td><td>-</td></tr>
+<tr><td>5</td><td><strong>000506.SZ</strong></td><td>中润资源投资</td><td>2026-08-26</td><td class="red">+58.88%</td><td>-</td></tr>
+<tr><td>6</td><td><strong>000517.SZ</strong></td><td>荣安地产股份</td><td>2026-08-26</td><td class="red">+36.31%</td><td>-</td></tr>
+<tr><td>7</td><td><strong>000593.SZ</strong></td><td>德龙汇能集团</td><td>2026-08-26</td><td class="red">+30.69%</td><td>-</td></tr>
+<tr><td>8</td><td><strong>000603.SZ</strong></td><td>盛达金属资源</td><td>2026-08-26</td><td class="red">+49.06%</td><td>-</td></tr>
+<tr><td>9</td><td><strong>000628.SZ</strong></td><td>成都高新发展</td><td>2026-08-26</td><td class="red">+30.92%</td><td>-</td></tr>
+<tr><td>10</td><td><strong>000632.SZ</strong></td><td>福建三木集团</td><td>2026-08-26</td><td class="red">+32.89%</td><td>-</td></tr>
+<tr><td>11</td><td><strong>000757.SZ</strong></td><td>四川浩物机电</td><td>2026-08-26</td><td class="red">+30.00%</td><td>-</td></tr>
+<tr><td>12</td><td><strong>000826.SZ</strong></td><td>启迪环境科技</td><td>2026-08-26</td><td class="red">+40.00%</td><td>-</td></tr>
+<tr><td>13</td><td><strong>000931.SZ</strong></td><td>北京中关村科</td><td>2026-08-26</td><td class="red">+31.16%</td><td>-</td></tr>
+<tr><td>14</td><td><strong>001210.SZ</strong></td><td>金房能源集团</td><td>2026-08-26</td><td class="red">+50.50%</td><td>-</td></tr>
+<tr><td>15</td><td><strong>001223.SZ</strong></td><td>欧克科技股份</td><td>2026-08-26</td><td class="red">+30.72%</td><td>-</td></tr>
+<tr><td>16</td><td><strong>001230.SZ</strong></td><td>劲旅环境科技</td><td>2026-08-26</td><td class="red">+32.97%</td><td>-</td></tr>
+<tr><td>17</td><td><strong>001268.SZ</strong></td><td>广东扬山联合</td><td>2026-08-26</td><td class="red">+35.04%</td><td>-</td></tr>
+<tr><td>18</td><td><strong>001326.SZ</strong></td><td>深圳市联域光</td><td>2026-08-26</td><td class="red">+34.46%</td><td>-</td></tr>
+<tr><td>19</td><td><strong>001337.SZ</strong></td><td>四川容大黄金</td><td>2026-08-26</td><td class="red">+34.32%</td><td>-</td></tr>
+<tr><td>20</td><td><strong>002081.SZ</strong></td><td>苏州金螳螂建</td><td>2026-08-26</td><td class="red">+53.39%</td><td>-</td></tr>
+<tr><td>21</td><td><strong>002084.SZ</strong></td><td>广州海鸥住宅</td><td>2026-08-26</td><td class="red">+44.28%</td><td>-</td></tr>
+<tr><td>22</td><td><strong>002172.SZ</strong></td><td>江苏澳洋健康</td><td>2026-08-26</td><td class="red">+52.90%</td><td>-</td></tr>
+<tr><td>23</td><td><strong>002193.SZ</strong></td><td>山东如意毛纺</td><td>2026-08-26</td><td class="red">+33.78%</td><td>-</td></tr>
+<tr><td>24</td><td><strong>002357.SZ</strong></td><td>四川富临运业</td><td>2026-08-26</td><td class="red">+32.89%</td><td>-</td></tr>
+<tr><td>25</td><td><strong>002388.SZ</strong></td><td>新亚制程(浙</td><td>2026-08-26</td><td class="red">+33.96%</td><td>-</td></tr>
+<tr><td>26</td><td><strong>002412.SZ</strong></td><td>湖南汉森制药</td><td>2026-08-26</td><td class="red">+79.32%</td><td>-</td></tr>
+<tr><td>27</td><td><strong>002418.SZ</strong></td><td>浙江康盛股份</td><td>2026-08-26</td><td class="red">+31.18%</td><td>-</td></tr>
+<tr><td>28</td><td><strong>002437.SZ</strong></td><td>哈尔滨誉衡药</td><td>2026-08-26</td><td class="red">+42.76%</td><td>-</td></tr>
+<tr><td>29</td><td><strong>002491.SZ</strong></td><td>通鼎互联信息</td><td>2026-08-26</td><td class="red">+35.67%</td><td>-</td></tr>
+<tr><td>30</td><td><strong>002552.SZ</strong></td><td>宝鼎科技股份</td><td>2026-08-21</td><td class="red">+39.03%</td><td>-</td></tr>
+<tr><td>31</td><td><strong>002578.SZ</strong></td><td>福建省闽发铝</td><td>2026-08-21</td><td class="red">+30.88%</td><td>-</td></tr>
+<tr><td>32</td><td><strong>002581.SZ</strong></td><td>山东未名生物</td><td>2026-08-21</td><td class="red">+75.45%</td><td>-</td></tr>
+<tr><td>33</td><td><strong>002586.SZ</strong></td><td>浙江省围海建</td><td>2026-08-21</td><td class="red">+30.90%</td><td>-</td></tr>
+<tr><td>34</td><td><strong>002631.SZ</strong></td><td>德尔未来科技</td><td>2026-08-21</td><td class="red">+47.22%</td><td>-</td></tr>
+<tr><td>35</td><td><strong>002647.SZ</strong></td><td>仁东控股股份</td><td>2026-08-21</td><td class="red">+41.03%</td><td>-</td></tr>
+<tr><td>36</td><td><strong>002655.SZ</strong></td><td>共达电声股份</td><td>2026-08-21</td><td class="red">+43.50%</td><td>-</td></tr>
+<tr><td>37</td><td><strong>002667.SZ</strong></td><td>威领新能源股</td><td>2026-08-21</td><td class="red">+103.28%</td><td>-</td></tr>
+<tr><td>38</td><td><strong>002695.SZ</strong></td><td>江西煌上煌集</td><td>2026-08-21</td><td class="red">+30.26%</td><td>-</td></tr>
+<tr><td>39</td><td><strong>002716.SZ</strong></td><td>郴州市金贵银</td><td>2026-08-21</td><td class="red">+35.50%</td><td>-</td></tr>
+<tr><td>40</td><td><strong>002726.SZ</strong></td><td>山东龙大美食</td><td>2026-08-21</td><td class="red">+47.34%</td><td>-</td></tr>
+<tr><td>41</td><td><strong>002743.SZ</strong></td><td>安徽富煌钢构</td><td>2026-08-21</td><td class="red">+34.50%</td><td>-</td></tr>
+<tr><td>42</td><td><strong>002768.SZ</strong></td><td>青岛国恩科技</td><td>2026-08-21</td><td class="red">+32.92%</td><td>-</td></tr>
+<tr><td>43</td><td><strong>002811.SZ</strong></td><td>深圳市郑中设</td><td>2026-08-21</td><td class="red">+41.93%</td><td>-</td></tr>
+<tr><td>44</td><td><strong>002827.SZ</strong></td><td>西藏高争民爆</td><td>2026-08-21</td><td class="red">+117.82%</td><td>-</td></tr>
+<tr><td>45</td><td><strong>002849.SZ</strong></td><td>浙江威星智能</td><td>2026-08-21</td><td class="red">+34.33%</td><td>-</td></tr>
+<tr><td>46</td><td><strong>002903.SZ</strong></td><td>宇环数控机床</td><td>2026-08-21</td><td class="red">+41.41%</td><td>-</td></tr>
+<tr><td>47</td><td><strong>002913.SZ</strong></td><td>奥士康科技股</td><td>2026-08-21</td><td class="red">+30.30%</td><td>-</td></tr>
+<tr><td>48</td><td><strong>002951.SZ</strong></td><td>四川金时科技</td><td>2026-08-21</td><td class="red">+33.14%</td><td>-</td></tr>
+<tr><td>49</td><td><strong>003023.SZ</strong></td><td>成都彩虹电器</td><td>2026-08-21</td><td class="red">+46.39%</td><td>-</td></tr>
+<tr><td>50</td><td><strong>003031.SZ</strong></td><td>河北中瓷电子</td><td>2026-08-21</td><td class="red">+30.90%</td><td>-</td></tr>
+<tr><td>51</td><td><strong>003032.SZ</strong></td><td>江苏传智播客</td><td>2026-08-21</td><td class="red">+78.74%</td><td>-</td></tr>
+<tr><td>52</td><td><strong>300016.SZ</strong></td><td>北京北陆药业</td><td>2026-08-21</td><td class="red">+33.16%</td><td>-</td></tr>
+<tr><td>53</td><td><strong>300050.SZ</strong></td><td>珠海世纪鼎利</td><td>2026-08-21</td><td class="red">+30.17%</td><td>-</td></tr>
+<tr><td>54</td><td><strong>300097.SZ</strong></td><td>大连智云自动</td><td>2026-08-21</td><td class="red">+32.33%</td><td>-</td></tr>
+<tr><td>55</td><td><strong>300112.SZ</strong></td><td>深圳万讯自控</td><td>2026-08-21</td><td class="red">+49.12%</td><td>-</td></tr>
+<tr><td>56</td><td><strong>300120.SZ</strong></td><td>天津经纬辉开</td><td>2026-08-21</td><td class="red">+41.07%</td><td>-</td></tr>
+<tr><td>57</td><td><strong>300139.SZ</strong></td><td>北京晓程科技</td><td>2026-08-21</td><td class="red">+35.04%</td><td>-</td></tr>
+<tr><td>58</td><td><strong>300142.SZ</strong></td><td>云南沃森生物</td><td>2026-08-21</td><td class="red">+30.26%</td><td>-</td></tr>
+<tr><td>59</td><td><strong>300154.SZ</strong></td><td>深圳市瑞凌实</td><td>2026-08-21</td><td class="red">+53.59%</td><td>-</td></tr>
+<tr><td>60</td><td><strong>300163.SZ</strong></td><td>宁波先锋新材</td><td>2026-08-21</td><td class="red">+35.76%</td><td>-</td></tr>
+<tr><td>61</td><td><strong>300189.SZ</strong></td><td>海南神农科技</td><td>2026-08-21</td><td class="red">+31.84%</td><td>-</td></tr>
+<tr><td>62</td><td><strong>300192.SZ</strong></td><td>苏州科德教育</td><td>2026-08-21</td><td class="red">+51.42%</td><td>-</td></tr>
+<tr><td>63</td><td><strong>300227.SZ</strong></td><td>深圳光韵达光</td><td>2026-08-21</td><td class="red">+38.24%</td><td>-</td></tr>
+<tr><td>64</td><td><strong>300234.SZ</strong></td><td>浙江开尔新材</td><td>2026-08-21</td><td class="red">+33.10%</td><td>-</td></tr>
+<tr><td>65</td><td><strong>300290.SZ</strong></td><td>荣科科技股份</td><td>2026-08-21</td><td class="red">+53.07%</td><td>-</td></tr>
+<tr><td>66</td><td><strong>300313.SZ</strong></td><td>新疆天山畜牧</td><td>2026-08-21</td><td class="red">+67.54%</td><td>-</td></tr>
+<tr><td>67</td><td><strong>300314.SZ</strong></td><td>宁波戴维医疗</td><td>2026-08-21</td><td class="red">+38.15%</td><td>-</td></tr>
+<tr><td>68</td><td><strong>300328.SZ</strong></td><td>东莞宜安科技</td><td>2026-08-21</td><td class="red">+42.77%</td><td>-</td></tr>
+<tr><td>69</td><td><strong>300333.SZ</strong></td><td>深圳兆日科技</td><td>2026-08-21</td><td class="red">+56.29%</td><td>-</td></tr>
+<tr><td>70</td><td><strong>300345.SZ</strong></td><td>湖南华民控股</td><td>2026-08-21</td><td class="red">+75.14%</td><td>-</td></tr>
+<tr><td>71</td><td><strong>300363.SZ</strong></td><td>重庆博腾制药</td><td>2026-08-21</td><td class="red">+33.39%</td><td>-</td></tr>
+<tr><td>72</td><td><strong>300394.SZ</strong></td><td>苏州天孚光通</td><td>2026-08-21</td><td class="red">+30.54%</td><td>-</td></tr>
+<tr><td>73</td><td><strong>300404.SZ</strong></td><td>博济医药科技</td><td>2026-08-21</td><td class="red">+50.00%</td><td>-</td></tr>
+<tr><td>74</td><td><strong>300486.SZ</strong></td><td>东杰智能科技</td><td>2026-08-21</td><td class="red">+31.82%</td><td>-</td></tr>
+<tr><td>75</td><td><strong>300534.SZ</strong></td><td>甘肃陇神戎发</td><td>2026-08-21</td><td class="red">+36.74%</td><td>-</td></tr>
+<tr><td>76</td><td><strong>300535.SZ</strong></td><td>四川达威科技</td><td>2026-08-21</td><td class="red">+33.96%</td><td>-</td></tr>
+<tr><td>77</td><td><strong>300545.SZ</strong></td><td>深圳市联得自</td><td>2026-08-21</td><td class="red">+32.56%</td><td>-</td></tr>
+<tr><td>78</td><td><strong>300560.SZ</strong></td><td>中富通集团股</td><td>2026-08-21</td><td class="red">+31.07%</td><td>-</td></tr>
+<tr><td>79</td><td><strong>300570.SZ</strong></td><td>深圳太辰光通</td><td>2026-08-21</td><td class="red">+52.11%</td><td>-</td></tr>
+<tr><td>80</td><td><strong>300587.SZ</strong></td><td>浙江天铁实业</td><td>2026-08-21</td><td class="red">+40.70%</td><td>-</td></tr>
+<tr><td>81</td><td><strong>300615.SZ</strong></td><td>深圳市欣天科</td><td>2026-08-21</td><td class="red">+54.84%</td><td>-</td></tr>
+<tr><td>82</td><td><strong>300684.SZ</strong></td><td>北京中石伟业</td><td>2026-08-21</td><td class="red">+63.30%</td><td>-</td></tr>
+<tr><td>83</td><td><strong>300725.SZ</strong></td><td>南京药石科技</td><td>2026-08-21</td><td class="red">+32.63%</td><td>-</td></tr>
+<tr><td>84</td><td><strong>300746.SZ</strong></td><td>汉嘉设计集团</td><td>2026-08-21</td><td class="red">+31.20%</td><td>-</td></tr>
+<tr><td>85</td><td><strong>300749.SZ</strong></td><td>广东顶固集创</td><td>2026-08-21</td><td class="red">+36.72%</td><td>-</td></tr>
+<tr><td>86</td><td><strong>300765.SZ</strong></td><td>石药创新制药</td><td>2026-08-21</td><td class="red">+34.54%</td><td>-</td></tr>
+<tr><td>87</td><td><strong>300862.SZ</strong></td><td>安徽蓝盾光电</td><td>2026-08-18</td><td class="red">+147.70%</td><td>-</td></tr>
+<tr><td>88</td><td><strong>300864.SZ</strong></td><td>南京大学环境</td><td>2026-08-21</td><td class="red">+35.01%</td><td>-</td></tr>
+<tr><td>89</td><td><strong>300865.SZ</strong></td><td>成都大宏立机</td><td>2026-08-21</td><td class="red">+39.32%</td><td>-</td></tr>
+<tr><td>90</td><td><strong>300877.SZ</strong></td><td>安徽金春无纺</td><td>2026-08-21</td><td class="red">+41.80%</td><td>-</td></tr>
+<tr><td>91</td><td><strong>300901.SZ</strong></td><td>浙江中胤时尚</td><td>2026-08-21</td><td class="red">+39.69%</td><td>-</td></tr>
+<tr><td>92</td><td><strong>300906.SZ</strong></td><td>江西日月明测</td><td>2026-08-21</td><td class="red">+32.90%</td><td>-</td></tr>
+<tr><td>93</td><td><strong>300916.SZ</strong></td><td>深圳朗特智能</td><td>2026-08-21</td><td class="red">+37.49%</td><td>-</td></tr>
+<tr><td>94</td><td><strong>300927.SZ</strong></td><td>南通江天化学</td><td>2026-08-21</td><td class="red">+32.01%</td><td>-</td></tr>
+<tr><td>95</td><td><strong>300931.SZ</strong></td><td>通用电梯股份</td><td>2026-08-21</td><td class="red">+34.95%</td><td>-</td></tr>
+<tr><td>96</td><td><strong>300935.SZ</strong></td><td>北京盈建科软</td><td>2026-08-21</td><td class="red">+38.89%</td><td>-</td></tr>
+<tr><td>97</td><td><strong>300936.SZ</strong></td><td>常州中英科技</td><td>2026-08-21</td><td class="red">+33.92%</td><td>-</td></tr>
+<tr><td>98</td><td><strong>300951.SZ</strong></td><td>深圳市博硕科</td><td>2026-08-21</td><td class="red">+37.46%</td><td>-</td></tr>
+<tr><td>99</td><td><strong>300981.SZ</strong></td><td>中红普林医疗</td><td>2026-08-21</td><td class="red">+37.92%</td><td>-</td></tr>
+<tr><td>100</td><td><strong>300989.SZ</strong></td><td>深圳市蕾奥规</td><td>2026-08-21</td><td class="red">+44.58%</td><td>-</td></tr>
+<tr><td>101</td><td><strong>301047.SZ</strong></td><td>北京义翘神州</td><td>2026-08-21</td><td class="red">+72.17%</td><td>-</td></tr>
+<tr><td>102</td><td><strong>301051.SZ</strong></td><td>深圳市信濠光</td><td>2026-08-21</td><td class="red">+52.37%</td><td>-</td></tr>
+<tr><td>103</td><td><strong>301060.SZ</strong></td><td>上海兰卫医学</td><td>2026-08-21</td><td class="red">+35.45%</td><td>-</td></tr>
+<tr><td>104</td><td><strong>301080.SZ</strong></td><td>北京百普赛斯</td><td>2026-08-21</td><td class="red">+85.04%</td><td>-</td></tr>
+<tr><td>105</td><td><strong>301106.SZ</strong></td><td>江苏骏成电子</td><td>2026-08-21</td><td class="red">+51.23%</td><td>-</td></tr>
+<tr><td>106</td><td><strong>301129.SZ</strong></td><td>瑞纳智能设备</td><td>2026-08-21</td><td class="red">+33.42%</td><td>-</td></tr>
+<tr><td>107</td><td><strong>301130.SZ</strong></td><td>吉林省西点药</td><td>2026-08-21</td><td class="red">+37.15%</td><td>-</td></tr>
+<tr><td>108</td><td><strong>301139.SZ</strong></td><td>元道通信股份</td><td>2026-08-21</td><td class="red">+30.77%</td><td>-</td></tr>
+<tr><td>109</td><td><strong>301171.SZ</strong></td><td>易点天下网络</td><td>2026-08-21</td><td class="red">+37.39%</td><td>-</td></tr>
+<tr><td>110</td><td><strong>301183.SZ</strong></td><td>湖北东田微科</td><td>2026-08-21</td><td class="red">+33.06%</td><td>-</td></tr>
+<tr><td>111</td><td><strong>301209.SZ</strong></td><td>龙口联合化学</td><td>2026-08-21</td><td class="red">+36.10%</td><td>-</td></tr>
+<tr><td>112</td><td><strong>301227.SZ</strong></td><td>哈尔滨森鹰窗</td><td>2026-08-21</td><td class="red">+72.04%</td><td>-</td></tr>
+<tr><td>113</td><td><strong>301230.SZ</strong></td><td>上海泓博智源</td><td>2026-08-21</td><td class="red">+39.75%</td><td>-</td></tr>
+<tr><td>114</td><td><strong>301234.SZ</strong></td><td>安徽宏宇五洲</td><td>2026-08-21</td><td class="red">+36.31%</td><td>-</td></tr>
+<tr><td>115</td><td><strong>301251.SZ</strong></td><td>江西威尔高电</td><td>2026-08-21</td><td class="red">+47.83%</td><td>-</td></tr>
+<tr><td>116</td><td><strong>301282.SZ</strong></td><td>金禄电子科技</td><td>2026-08-21</td><td class="red">+54.92%</td><td>-</td></tr>
+<tr><td>117</td><td><strong>301366.SZ</strong></td><td>深圳市一博科</td><td>2026-08-21</td><td class="red">+40.42%</td><td>-</td></tr>
+<tr><td>118</td><td><strong>301395.SZ</strong></td><td>惠州仁信新材</td><td>2026-08-21</td><td class="red">+37.29%</td><td>-</td></tr>
+<tr><td>119</td><td><strong>301419.SZ</strong></td><td>上海阿莱德实</td><td>2026-08-21</td><td class="red">+40.58%</td><td>-</td></tr>
+<tr><td>120</td><td><strong>301516.SZ</strong></td><td>深圳市核达中</td><td>2026-08-21</td><td class="red">+46.08%</td><td>-</td></tr>
+<tr><td>121</td><td><strong>301591.SZ</strong></td><td>南京肯特复合</td><td>2026-08-21</td><td class="red">+37.83%</td><td>-</td></tr>
+<tr><td>122</td><td><strong>600127.SH</strong></td><td>金健米业股份</td><td>2026-08-21</td><td class="red">+49.09%</td><td>-</td></tr>
+<tr><td>123</td><td><strong>600162.SH</strong></td><td>深圳香江控股</td><td>2026-08-21</td><td class="red">+49.29%</td><td>-</td></tr>
+<tr><td>124</td><td><strong>600165.SH</strong></td><td>宁夏中科生物</td><td>2026-08-21</td><td class="red">+36.21%</td><td>-</td></tr>
+<tr><td>125</td><td><strong>600186.SH</strong></td><td>莲花健康产业</td><td>2026-08-21</td><td class="red">+31.60%</td><td>-</td></tr>
+<tr><td>126</td><td><strong>600228.SH</strong></td><td>返利网数字科</td><td>2026-08-21</td><td class="red">+38.92%</td><td>-</td></tr>
+<tr><td>127</td><td><strong>600272.SH</strong></td><td>上海开开实业</td><td>2026-08-21</td><td class="red">+61.13%</td><td>-</td></tr>
+<tr><td>128</td><td><strong>600330.SH</strong></td><td>天通控股股份</td><td>2026-08-21</td><td class="red">+39.13%</td><td>-</td></tr>
+<tr><td>129</td><td><strong>600353.SH</strong></td><td>成都旭光电子</td><td>2026-08-21</td><td class="red">+38.60%</td><td>-</td></tr>
+<tr><td>130</td><td><strong>600379.SH</strong></td><td>陕西宝光真空</td><td>2026-08-21</td><td class="red">+31.75%</td><td>-</td></tr>
+<tr><td>131</td><td><strong>600381.SH</strong></td><td>青海春天药用</td><td>2026-08-21</td><td class="red">+33.51%</td><td>-</td></tr>
+<tr><td>132</td><td><strong>600491.SH</strong></td><td>龙元建设集团</td><td>2026-08-21</td><td class="red">+44.80%</td><td>-</td></tr>
+<tr><td>133</td><td><strong>600547.SH</strong></td><td>山东黄金矿业</td><td>2026-08-21</td><td class="red">+40.13%</td><td>-</td></tr>
+<tr><td>134</td><td><strong>600613.SH</strong></td><td>上海神奇制药</td><td>2026-08-21</td><td class="red">+86.72%</td><td>-</td></tr>
+<tr><td>135</td><td><strong>600629.SH</strong></td><td>华东建筑集团</td><td>2026-08-21</td><td class="red">+35.95%</td><td>-</td></tr>
+<tr><td>136</td><td><strong>600663.SH</strong></td><td>上海陆家嘴金</td><td>2026-08-21</td><td class="red">+32.34%</td><td>-</td></tr>
+<tr><td>137</td><td><strong>600664.SH</strong></td><td>哈药集团股份</td><td>2026-08-21</td><td class="red">+44.86%</td><td>-</td></tr>
+<tr><td>138</td><td><strong>600721.SH</strong></td><td>新疆百花村医</td><td>2026-08-21</td><td class="red">+89.29%</td><td>-</td></tr>
+<tr><td>139</td><td><strong>600722.SH</strong></td><td>河北金牛化工</td><td>2026-08-21</td><td class="red">+37.51%</td><td>-</td></tr>
+<tr><td>140</td><td><strong>600815.SH</strong></td><td>厦门厦工机械</td><td>2026-08-21</td><td class="red">+36.59%</td><td>-</td></tr>
+<tr><td>141</td><td><strong>601069.SH</strong></td><td>西部黄金股份</td><td>2026-08-21</td><td class="red">+37.82%</td><td>-</td></tr>
+<tr><td>142</td><td><strong>601579.SH</strong></td><td>会稽山绍兴酒</td><td>2026-08-21</td><td class="red">+31.87%</td><td>-</td></tr>
+<tr><td>143</td><td><strong>601609.SH</strong></td><td>宁波金田铜业</td><td>2026-08-21</td><td class="red">+34.73%</td><td>-</td></tr>
+<tr><td>144</td><td><strong>601700.SH</strong></td><td>常熟风范电力</td><td>2026-08-21</td><td class="red">+42.48%</td><td>-</td></tr>
+<tr><td>145</td><td><strong>601886.SH</strong></td><td>江河创建集团</td><td>2026-08-21</td><td class="red">+56.02%</td><td>-</td></tr>
+<tr><td>146</td><td><strong>603001.SH</strong></td><td>浙江奥康鞋业</td><td>2026-08-21</td><td class="red">+33.06%</td><td>-</td></tr>
+<tr><td>147</td><td><strong>603036.SH</strong></td><td>江苏如通石油</td><td>2026-08-21</td><td class="red">+32.24%</td><td>-</td></tr>
+<tr><td>148</td><td><strong>603038.SH</strong></td><td>东莞市华立实</td><td>2026-08-21</td><td class="red">+39.73%</td><td>-</td></tr>
+<tr><td>149</td><td><strong>603039.SH</strong></td><td>泛微网络科技</td><td>2026-08-21</td><td class="red">+46.52%</td><td>-</td></tr>
+<tr><td>150</td><td><strong>603079.SH</strong></td><td>浙江圣达生物</td><td>2026-08-21</td><td class="red">+33.87%</td><td>-</td></tr>
+<tr><td>151</td><td><strong>603151.SH</strong></td><td>山东邦基科技</td><td>2026-08-21</td><td class="red">+36.24%</td><td>-</td></tr>
+<tr><td>152</td><td><strong>603156.SH</strong></td><td>河北养元智汇</td><td>2026-08-21</td><td class="red">+40.70%</td><td>-</td></tr>
+<tr><td>153</td><td><strong>603217.SH</strong></td><td>元利化学集团</td><td>2026-08-21</td><td class="red">+39.99%</td><td>-</td></tr>
+<tr><td>154</td><td><strong>603221.SH</strong></td><td>爱丽家居科技</td><td>2026-08-21</td><td class="red">+70.52%</td><td>-</td></tr>
+<tr><td>155</td><td><strong>603259.SH</strong></td><td>无锡药明康德</td><td>2026-08-21</td><td class="red">+30.64%</td><td>-</td></tr>
+<tr><td>156</td><td><strong>603269.SH</strong></td><td>江苏海鸥冷却</td><td>2026-08-21</td><td class="red">+50.68%</td><td>-</td></tr>
+<tr><td>157</td><td><strong>603330.SH</strong></td><td>天洋新材(上</td><td>2026-08-21</td><td class="red">+50.83%</td><td>-</td></tr>
+<tr><td>158</td><td><strong>603358.SH</strong></td><td>华达汽车科技</td><td>2026-08-21</td><td class="red">+38.59%</td><td>-</td></tr>
+<tr><td>159</td><td><strong>603580.SH</strong></td><td>艾艾精密工业</td><td>2026-08-21</td><td class="red">+68.61%</td><td>-</td></tr>
+<tr><td>160</td><td><strong>603626.SH</strong></td><td>昆山科森科技</td><td>2026-08-21</td><td class="red">+39.91%</td><td>-</td></tr>
+<tr><td>161</td><td><strong>603655.SH</strong></td><td>常州朗博密封</td><td>2026-08-21</td><td class="red">+33.60%</td><td>-</td></tr>
+<tr><td>162</td><td><strong>603660.SH</strong></td><td>苏州科达科技</td><td>2026-08-21</td><td class="red">+34.55%</td><td>-</td></tr>
+<tr><td>163</td><td><strong>603682.SH</strong></td><td>上海锦和商业</td><td>2026-08-21</td><td class="red">+38.59%</td><td>-</td></tr>
+<tr><td>164</td><td><strong>603699.SH</strong></td><td>苏州纽威阀门</td><td>2026-08-21</td><td class="red">+32.82%</td><td>-</td></tr>
+<tr><td>165</td><td><strong>603758.SH</strong></td><td>重庆秦安机电</td><td>2026-08-21</td><td class="red">+32.58%</td><td>-</td></tr>
+<tr><td>166</td><td><strong>603801.SH</strong></td><td>志邦家居股份</td><td>2026-08-21</td><td class="red">+30.39%</td><td>-</td></tr>
+<tr><td>167</td><td><strong>603838.SH</strong></td><td>广东四通集团</td><td>2026-08-21</td><td class="red">+63.69%</td><td>-</td></tr>
+<tr><td>168</td><td><strong>603880.SH</strong></td><td>江苏南方卫材</td><td>2026-08-21</td><td class="red">+37.44%</td><td>-</td></tr>
+<tr><td>169</td><td><strong>603958.SH</strong></td><td>哈森商贸(中</td><td>2026-08-21</td><td class="red">+52.90%</td><td>-</td></tr>
+<tr><td>170</td><td><strong>605179.SH</strong></td><td>浙江一鸣食品</td><td>2026-08-14</td><td class="red">+141.19%</td><td>-</td></tr>
+<tr><td>171</td><td><strong>605286.SH</strong></td><td>江苏同力日升</td><td>2026-08-14</td><td class="red">+40.54%</td><td>-</td></tr>
+</tbody>
+      </table>
+    </div>
+    
+  <footer>StockMarket Strategy Screener</footer>
+</div>
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.stat-card').forEach(s => s.classList.remove('active'));
+  var panel = document.getElementById('panel-' + name);
+  if (panel) panel.style.display = 'block';
+  var tab = document.getElementById('tab-' + name);
+  if (tab) tab.classList.add('active');
+  var stat = document.getElementById('stat-' + name);
+  if (stat) stat.classList.add('active');
+}
+</script>
+</body>
+</html>

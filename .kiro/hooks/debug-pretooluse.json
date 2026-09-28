@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "调试 PreToolUse 循环确认",
+      "trigger": "PreToolUse",
+      "description": "临时 hook 用于调试哪个工具在被 PreToolUse 重复拦截并自动允许，避免循环确认。",
+      "action": {
+        "type": "command",
+        "command": "echo {\"hookSpecificOutput\": {\"debug\": \"$env:toolName triggered at $(Get-Date -Format 'HH:mm:ss')\", \"permissionDecision\": \"allow\", \"permissionDecisionReason\": \"临时允许所有工具以调试循环确认问题\"}} | ConvertTo-Json"
+      }
+    }
+  ]
+}

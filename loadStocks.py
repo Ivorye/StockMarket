@@ -1,43 +1,15 @@
 import pymysql, pandas as pd, tushare as ts, time, datetime
+import db_utils
 
 TUSHARE_TOKEN = "4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9"
 
 #返回数据库连接。需要依赖本地已建立数据库schema（stockshare）
 def connectDB():
-	db=pymysql.connect(host='localhost',
-		user='root',
-		password='P@ssw0rd',
-		database='stockshare',connect_timeout=10,read_timeout=30,write_timeout=30)
-	return db
+	return db_utils.connect_pymysql()
 
-def _escape_table_name(name):
-	"""用反引号包裹表名，防止SQL关键字冲突"""
-	return "`%s`" % name.replace('`', '')
 
-def _check_execution_status(task_name):
-	"""检查任务是否已成功执行过"""
-	try:
-		db=connectDB()
-		cursor=db.cursor()
-		cursor.execute("SELECT status FROM st_execution_status WHERE task_name=%s",(task_name,))
-		row=cursor.fetchone()
-		cursor.close();db.close()
-		return row and row[0]=='Y'
-	except Exception:
-		return False
 
-def _update_execution_status(task_name, status='Y'):
-	"""更新任务执行状态"""
-	try:
-		db=connectDB()
-		cursor=db.cursor()
-		today=datetime.date.today().strftime('%Y%m%d')
-		sql="INSERT INTO st_execution_status(task_name,exec_date,status) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE exec_date=%s,status=%s"
-		cursor.execute(sql,(task_name,today,status,today,status))
-		db.commit()
-		cursor.close();db.close()
-	except Exception as e:
-		print(f'更新执行状态失败: {e}')
+
 
 #获取最新股票列表（调tushare API），同时缓存到stocks表
 #API失败时检查执行状态，状态为Y则直接从stocks表读取缓存
@@ -47,10 +19,12 @@ def getStockBasic():
 		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,fullname,area,industry,list_date')
 		df=pd.DataFrame(data)
 		_store_to_stocks(df)
-		_update_execution_status('stock_basic','Y')
+		today_date = datetime.date.today().strftime('%Y%m%d')
+		db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='pymysql')
 		return df
 	except Exception as e:
-		if _check_execution_status('stock_basic'):
+		today_date = datetime.date.today().strftime('%Y%m%d')
+		if db_utils.check_execution_status('stock_basic', exec_date=today_date, driver='pymysql'):
 			print('tushare API失败，st_execution_status状态为Y，从stocks表读取缓存')
 			return getStockBasicFromDB()
 		print('tushare API失败且无成功执行记录: %s'%e)
