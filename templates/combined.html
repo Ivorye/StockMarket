@@ -54,6 +54,7 @@
         .kline-preview-trigger:hover { color: #1677ff; border-color: #1677ff; background: #f0f5ff; }
         .kline-trigger:focus-visible, .kline-preview-trigger:focus-visible, .chart-close:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; }
         .chart-overlay { display: none; position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.38); align-items: flex-end; justify-content: center; }
+        .chart-overlay:focus { outline: none; }
         .chart-overlay.open { display: flex; }
         .chart-drawer { width: min(1120px, 100%); background: #fff; border-radius: 8px 8px 0 0; padding: 18px 20px 20px; box-shadow: 0 -8px 32px rgba(0,0,0,.16); }
         .chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
@@ -528,7 +529,7 @@
     </div>
 </div>
 
-<div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" onclick="if(event.target===this)closeKline()">
+<div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" tabindex="-1" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
         <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>▲</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>▼</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
         <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
@@ -642,6 +643,8 @@ async function openKline(code, triggerEl, keepNav = false) {
     currentChartEndDate = '{{ data.today }}';
     updateRangeControls();
     overlay.classList.add('open'); statusEl.style.display = 'grid'; statusEl.textContent = '正在加载行情…';
+    // 焦点移入面板（非按钮），使 Enter 命中全局快捷键而非原生激活表格里的 K线按钮
+    overlay.focus({ preventScroll: true });
     document.getElementById('chart-title').textContent = code + ' K线';
     document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日`;
     try {
@@ -658,6 +661,7 @@ async function openKline(code, triggerEl, keepNav = false) {
 async function showLatestKline() {
     if (!currentChartCode) return;
     const button = document.getElementById('chart-latest');
+    if (button.disabled) return;   // 连按 Enter 时不重复发起请求
     button.disabled = true; statusEl.style.display = 'grid'; statusEl.textContent = '正在加载最新行情…';
     try {
         const response = await fetch(`/api/kline/${encodeURIComponent(currentChartCode)}?days=${currentChartDays}`);
@@ -736,6 +740,12 @@ document.addEventListener('keydown', event => {
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
     if (event.key === 'PageUp') { event.preventDefault(); stepKlineStock(-1); }
     else if (event.key === 'PageDown') { event.preventDefault(); stepKlineStock(1); }
+    else if (event.key === 'Enter') {
+        // 焦点在按钮/链接上时交给浏览器原生激活，避免与该元素自身的 Enter 重复触发
+        if (tag === 'button' || tag === 'a') return;
+        event.preventDefault();
+        showLatestKline();
+    }
 });
 async function fetchKline(code, signal, days = 120, endDate = '{{ data.today }}') {
     const cacheKey = `${code}|${days}|${endDate || 'latest'}`;
