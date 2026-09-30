@@ -73,6 +73,10 @@
         .chart-step button { width: 36px; height: 36px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 18px; }
         .chart-step button:hover { border-color: #1677ff; color: #1677ff; background: #f0f5ff; }
         .chart-step button:disabled { border-color: #eee; color: #bbb; background: #fafafa; cursor: not-allowed; }
+        .chart-stock { display: inline-flex; flex-direction: column; gap: 2px; }
+        .chart-stock button { width: 36px; height: 21px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 11px; line-height: 1; }
+        .chart-stock button:hover { border-color: #1677ff; color: #1677ff; background: #f0f5ff; }
+        .chart-stock button:disabled { border-color: #eee; color: #bbb; background: #fafafa; cursor: not-allowed; }
         .chart-close { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #666; cursor: pointer; font-size: 24px; }
         .chart-stage { position: relative; height: 480px; border: 1px solid #eee; background: #fff; }
         #kline-canvas { width: 100%; height: 100%; display: block; }
@@ -198,6 +202,8 @@
 
     <div class="tabs">
         <div class="tab active" onclick="switchTab(event, 'smooth')">30日平缓上涨 ({{ data.smooth | length }})</div>
+        <div class="tab" onclick="switchTab(event, 'bullflag')">上升旗形 ({{ bull_flag.count }})</div>
+        <div class="tab" onclick="switchTab(event, 'smallpole')">小旗杆 ({{ small_pole.count }})</div>
         <div class="tab" onclick="switchTab(event, 'combined')">合并策略 ({{ data.combined | length }})</div>
         <div class="tab" onclick="switchTab(event, 'gap')">跳空缺口 ({{ data.s2 | length }})</div>
         <div class="tab" onclick="switchTab(event, 'surge')">放量涨幅 ({{ data.s1 | length }})</div>
@@ -217,7 +223,7 @@
                 <th>起始价</th><th>最新价</th></tr></thead>
             <tbody>{% for r in data.smooth %}<tr>
                 <td>{{ loop.index }}</td>
-                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                 <td>{{ r.name }}</td>
                 <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
@@ -229,6 +235,72 @@
         {% else %}<div class="empty">所选日期前没有股票同时满足完整30个交易日与平缓上涨条件。</div>{% endif %}
     </div>
 
+    <!-- 上升旗形面板 -->
+    <div class="panel" id="panel-bullflag">
+        <div class="strategy-note">区间 {{ bull_flag.start_date }} 至 {{ bull_flag.signal_date }}，最近{{ bull_flag.trading_days }}个交易日。条件：旗杆涨幅≥15%、旗面回撤5%~45%、旗面宽度≤25%、旗面高点下倾或走平、缩量至旗杆均量的70%以内、最新收盘仍在旗内。点击栏名可排序。</div>
+        {% if bull_flag.records %}
+        <div class="table-scroll"><table id="bullflag-table">
+            <thead><tr><th>#</th><th>股票</th><th>名称</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(3)" onkeydown="if(event.key==='Enter')sortFlag(3)">旗杆涨幅 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(4)" onkeydown="if(event.key==='Enter')sortFlag(4)">旗面回撤 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(5)" onkeydown="if(event.key==='Enter')sortFlag(5)">旗面宽度 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(6)" onkeydown="if(event.key==='Enter')sortFlag(6)">量缩至 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(7)" onkeydown="if(event.key==='Enter')sortFlag(7)">末端位置 ↕</th>
+                <th>杆/旗</th><th>旗杆顶</th><th>旗面低</th><th>最新价</th>
+                <th class="sortable" tabindex="0" onclick="sortFlag(12)" onkeydown="if(event.key==='Enter')sortFlag(12)">当日涨幅 ↕</th></tr></thead>
+            <tbody>{% for r in bull_flag.records %}<tr>
+                <td>{{ loop.index }}</td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                <td>{{ r.name }}</td>
+                <td class="metric" data-value="{{ r.pole_gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pole_gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pole_gain_pct * 2, 100]|min }}%"></span></div></td>
+                <td class="metric" data-value="{{ r.retrace_pct }}"><div class="metric-value">{{ "%.2f"|format(r.retrace_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ [r.retrace_pct * 2, 100]|min }}%"></span></div></td>
+                <td data-value="{{ r.flag_range_pct }}">{{ "%.2f"|format(r.flag_range_pct) }}%</td>
+                <td data-value="{{ r.vol_dry_pct }}">{{ "%.1f"|format(r.vol_dry_pct) }}%</td>
+                <td data-value="{{ r.close_pos_pct }}">{{ "%.1f"|format(r.close_pos_pct) }}%</td>
+                <td>{{ r.pole_bars }}/{{ r.flag_bars }}</td>
+                <td>{{ "%.2f"|format(r.pole_high) }}</td>
+                <td>{{ "%.2f"|format(r.flag_low) }}</td>
+                <td>{{ "%.2f"|format(r.last_close) }}</td>
+                <td class="metric" data-value="{{ r.pct_chg }}"><div class="metric-value">{{ "%.2f"|format(r.pct_chg) }}%</div></td>
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<div class="empty">最近{{ bull_flag.trading_days }}个交易日内没有股票满足完整的上升旗形条件。</div>{% endif %}
+    </div>
+
+    <!-- 小旗杆面板 -->
+    <div class="panel" id="panel-smallpole">
+        <div class="strategy-note">区间 {{ small_pole.start_date }} 至 {{ small_pole.signal_date }}。旗杆日：单日涨幅&gt;8%且成交量≥前5日均量3倍；其后3~5个交易日所有收盘价≥旗杆日开盘价×1.03（地板价）。十字星口径：实体≤振幅25%，仅作形态标注、不参与筛选。点击栏名可排序。</div>
+        {% if small_pole.records %}
+        <div class="table-scroll"><table id="smallpole-table">
+            <thead><tr><th>#</th><th>股票</th><th>名称</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(3)" onkeydown="if(event.key==='Enter')sortPole(3)">旗杆日 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(4)" onkeydown="if(event.key==='Enter')sortPole(4)">旗杆涨幅 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(5)" onkeydown="if(event.key==='Enter')sortPole(5)">放量倍数 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(6)" onkeydown="if(event.key==='Enter')sortPole(6)">整理天数 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(7)" onkeydown="if(event.key==='Enter')sortPole(7)">安全垫 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(8)" onkeydown="if(event.key==='Enter')sortPole(8)">十字星数 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortPole(9)" onkeydown="if(event.key==='Enter')sortPole(9)">整理涨跌 ↕</th>
+                <th>首日开盘</th><th>地板价</th><th>整理最低收</th><th>最新价</th></tr></thead>
+            <tbody>{% for r in small_pole.records %}<tr>
+                <td>{{ loop.index }}</td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                <td>{{ r.name }}</td>
+                <td data-value="{{ r.trade_date }}">{{ r.trade_date }}</td>
+                <td class="metric" data-value="{{ r.pct_chg }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pct_chg) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pct_chg * 4, 100]|min }}%"></span></div></td>
+                <td data-value="{{ r.vol_ratio }}">{{ "%.2f"|format(r.vol_ratio) }}x</td>
+                <td data-value="{{ r.hold_days }}">{{ r.hold_days }} 天</td>
+                <td class="metric" data-value="{{ r.safe_margin_pct }}"><div class="metric-value">{{ "%.2f"|format(r.safe_margin_pct) }}%</div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.safe_margin_pct * 4, 100]|min }}%"></span></div></td>
+                <td data-value="{{ r.doji_days }}">{{ r.doji_days }}/{{ r.hold_days }}</td>
+                <td data-value="{{ r.follow_return_pct }}">{{ "%.2f"|format(r.follow_return_pct) }}%</td>
+                <td>{{ "%.2f"|format(r.day1_open) }}</td>
+                <td>{{ "%.2f"|format(r.floor_price) }}</td>
+                <td>{{ "%.2f"|format(r.min_close) }}</td>
+                <td>{{ "%.2f"|format(r.last_close) }}</td>
+            </tr>{% endfor %}</tbody>
+        </table></div>
+        {% else %}<div class="empty">最近区间内没有股票同时满足小旗杆与整理期条件。</div>{% endif %}
+    </div>
+
     <!-- 合并策略面板 -->
     <div class="panel" id="panel-combined">
         {% if data.combined %}
@@ -238,6 +310,7 @@
                 <tr>
                     <th>#</th>
                     <th>股票代码</th>
+                    <th>名称</th>
                     <th>涨幅(%)</th>
                     <th>量比</th>
                     <th>缺口</th>
@@ -253,7 +326,8 @@
                 {% for r in data.combined %}
                 <tr>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td>{{ r.name }}</td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -301,6 +375,7 @@
                 <tr>
                     <th>#</th>
                     <th>股票代码</th>
+                    <th>名称</th>
                     <th>涨幅(%)</th>
                     <th>量比</th>
                     <th>缺口</th>
@@ -314,7 +389,8 @@
                 {% for r in data.s2 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td>{{ r.name }}</td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -364,6 +440,7 @@
                 <tr>
                     <th>#</th>
                     <th>股票代码</th>
+                    <th>名称</th>
                     <th>涨幅(%)</th>
                     <th>量比</th>
                     <th>今收</th>
@@ -374,7 +451,8 @@
                 {% for r in data.s1 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" onclick="openKline('{{ r.st_code }}')">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td>{{ r.name }}</td>
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -412,12 +490,13 @@
     </div>
 
     <div class="panel" id="panel-yearly-double">
-        <div class="strategy-note" id="yearly-double-note">正在加载最近一年低点到高点翻倍股；首次扫描可能需要约 1 分钟，结果会缓存30分钟。</div>
+        <div class="strategy-note" id="yearly-double-note">按“先出现区间最低价 low，之后最高价 high 至少达到 2 倍”筛选最近一年数据。默认不查询，点击下方按钮后才开始扫描；首次扫描可能需要约 1 分钟，结果会缓存30分钟。</div>
+        <p><button type="button" class="btn-primary" id="yearly-double-run" onclick="loadYearlyDouble()">扫描年度翻倍股</button></p>
         <div class="table-scroll" id="yearly-double-table-wrap" style="display:none;"><table>
             <thead><tr><th>#</th><th>股票</th><th>名称</th><th>最低日</th><th>最低价</th><th>最高日</th><th>最高价</th><th>区间涨幅</th><th>当前价</th><th>低点至今</th><th>高点至今</th></tr></thead>
             <tbody id="yearly-double-body"></tbody>
         </table></div>
-        <div class="empty" id="yearly-double-empty">正在加载…</div>
+        <div class="empty" id="yearly-double-empty">尚未扫描，点击上方“扫描年度翻倍股”按钮后显示结果。</div>
     </div>
 
     <div class="panel" id="panel-backtest">
@@ -451,7 +530,7 @@
 
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
-        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>▲</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>▼</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
         <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
     </section>
 </div>
@@ -481,6 +560,34 @@ function sortSmooth(column) {
     });
     rows.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
 }
+let flagSort = { column: 3, ascending: false };
+function sortFlag(column) {
+    const body = document.querySelector('#bullflag-table tbody');
+    if (!body) return;
+    flagSort.ascending = flagSort.column === column ? !flagSort.ascending : false;
+    flagSort.column = column;
+    const rows = Array.from(body.rows);
+    rows.sort((a, b) => {
+        const av = Number(a.cells[column].dataset.value);
+        const bv = Number(b.cells[column].dataset.value);
+        return flagSort.ascending ? av - bv : bv - av;
+    });
+    rows.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
+}
+let poleSort = { column: 3, ascending: false };
+function sortPole(column) {
+    const body = document.querySelector('#smallpole-table tbody');
+    if (!body) return;
+    poleSort.ascending = poleSort.column === column ? !poleSort.ascending : (column === 3);
+    poleSort.column = column;
+    const rows = Array.from(body.rows);
+    rows.sort((a, b) => {
+        const av = Number(a.cells[column].dataset.value);
+        const bv = Number(b.cells[column].dataset.value);
+        return poleSort.ascending ? av - bv : bv - av;
+    });
+    rows.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
+}
 const overlay = document.getElementById('chart-overlay');
 const statusEl = document.getElementById('chart-status');
 const canvas = document.getElementById('kline-canvas');
@@ -496,22 +603,54 @@ let currentChartEndDate = '';
 let previewTimer = null;
 let previewRequest = null;
 const klineCache = new Map();
-async function openKline(code) {
+let klineNavCodes = [];
+let klineNavIndex = -1;
+// 记录来源列表（按当前排序后的 DOM 顺序），供 ▲▼ / PgUp/PgDn 切换上下只股票
+function setKlineNav(triggerEl, code) {
+    const table = triggerEl && triggerEl.closest ? triggerEl.closest('table') : null;
+    if (table) {
+        klineNavCodes = Array.from(table.querySelectorAll('.kline-trigger'))
+            .map(b => b.dataset.code || '').filter(Boolean);
+        klineNavIndex = klineNavCodes.indexOf(code);
+    } else {
+        klineNavCodes = []; klineNavIndex = -1;
+    }
+    updateKlineNav();
+}
+function updateKlineNav() {
+    const prev = document.getElementById('stock-prev');
+    const next = document.getElementById('stock-next');
+    prev.disabled = klineNavIndex <= 0;
+    next.disabled = klineNavIndex < 0 || klineNavIndex >= klineNavCodes.length - 1;
+}
+async function stepKlineStock(delta) {
+    if (!klineNavCodes.length) return;
+    const next = klineNavIndex + delta;
+    if (next < 0 || next >= klineNavCodes.length) return;
+    klineNavIndex = next;
+    updateKlineNav();
+    await openKline(klineNavCodes[klineNavIndex], null, true);
+}
+async function openKline(code, triggerEl, keepNav = false) {
+    if (!keepNav) {
+        setKlineNav(triggerEl, code);
+        lastChartButton = triggerEl || document.activeElement;
+    }
     currentChartCode = code;
-    currentChartDays = 120;
+    if (!keepNav) currentChartDays = 120;
     currentChartLatest = false;
     currentChartEndDate = '{{ data.today }}';
     updateRangeControls();
-    lastChartButton = document.activeElement;
     overlay.classList.add('open'); statusEl.style.display = 'grid'; statusEl.textContent = '正在加载行情…';
     document.getElementById('chart-title').textContent = code + ' K线';
-    document.getElementById('chart-meta').textContent = '最近120个交易日';
+    document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日`;
     try {
         const data = await fetchKline(code, null, currentChartDays, '{{ data.today }}');
         if (!data.items.length) throw new Error('该日期前没有可显示的日线数据');
         document.getElementById('chart-title').textContent = `${code} ${data.name || ''}`;
         currentChartItems = data.items;
         currentChartEndDate = data.items[data.items.length - 1].date;
+        setKlineMeta(currentChartDays, data);
         updateDateControls();
         statusEl.style.display = 'none'; drawKline(currentChartItems);
     } catch (error) { statusEl.textContent = error.message; }
@@ -529,7 +668,7 @@ async function showLatestKline() {
         currentChartLatest = true;
         currentChartEndDate = data.items[data.items.length - 1].date;
         updateDateControls();
-        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日 · 更新至 ${data.items[data.items.length - 1].date}`;
+        setKlineMeta(currentChartDays, data, ` · 更新至 ${data.items[data.items.length - 1].date}`);
         statusEl.style.display = 'none'; drawKline(currentChartItems);
     } catch (error) { statusEl.textContent = error.message; }
     finally { button.disabled = false; }
@@ -546,7 +685,7 @@ async function shiftKlineDate(direction) {
         currentChartItems = data.items;
         currentChartEndDate = data.items[data.items.length - 1].date;
         currentChartLatest = currentChartEndDate === '{{ data.latest_date }}';
-        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日 · 截止 ${currentChartEndDate}`;
+        setKlineMeta(currentChartDays, data, ` · 截止 ${currentChartEndDate}`);
         statusEl.style.display = 'none'; drawKline(currentChartItems); updateDateControls();
     } catch (error) { statusEl.textContent = error.message; }
     finally { updateDateControls(); }
@@ -554,6 +693,20 @@ async function shiftKlineDate(direction) {
 function updateDateControls() {
     document.getElementById('date-next').disabled = !currentChartEndDate || currentChartEndDate >= '{{ data.latest_date }}';
     document.getElementById('date-prev').disabled = !currentChartEndDate;
+}
+// 实际K线数少于请求天数时，说明该股历史不足，提示已达数据上限
+function setKlineMeta(days, data, suffix = '') {
+    const el = document.getElementById('chart-meta');
+    const have = data.items.length;
+    const base = `最近${days}个交易日`;
+    if (have >= days) {
+        el.textContent = base + suffix;
+        el.style.color = '';
+        return;
+    }
+    const first = have ? data.items[0].date : '';
+    el.textContent = `${base} · 该股仅${have}根K线${first ? `（始于${first}）` : ''}，已达数据上限` + suffix;
+    el.style.color = '#d46b08';
 }
 async function changeKlineRange(delta) {
     const nextDays = Math.max(60, Math.min(240, currentChartDays + delta));
@@ -565,8 +718,7 @@ async function changeKlineRange(delta) {
         const data = await fetchKline(currentChartCode, null, currentChartDays, endDate);
         if (!data.items.length) throw new Error('没有可显示的日线数据');
         currentChartItems = data.items;
-        const suffix = currentChartLatest ? ` · 更新至 ${data.items[data.items.length - 1].date}` : '';
-        document.getElementById('chart-meta').textContent = `最近${currentChartDays}个交易日${suffix}`;
+        setKlineMeta(currentChartDays, data, currentChartLatest ? ` · 更新至 ${data.items[data.items.length - 1].date}` : '');
         statusEl.style.display = 'none'; drawKline(currentChartItems);
     } catch (error) { statusEl.textContent = error.message; }
 }
@@ -576,7 +728,15 @@ function updateRangeControls() {
     document.getElementById('range-less').disabled = currentChartDays <= 60;
 }
 function closeKline() { overlay.classList.remove('open'); if (lastChartButton) lastChartButton.focus(); }
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && overlay.classList.contains('open')) closeKline(); });
+document.addEventListener('keydown', event => {
+    if (!overlay.classList.contains('open')) return;
+    if (event.key === 'Escape') { closeKline(); return; }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const tag = (event.target && event.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (event.key === 'PageUp') { event.preventDefault(); stepKlineStock(-1); }
+    else if (event.key === 'PageDown') { event.preventDefault(); stepKlineStock(1); }
+});
 async function fetchKline(code, signal, days = 120, endDate = '{{ data.today }}') {
     const cacheKey = `${code}|${days}|${endDate || 'latest'}`;
     if (klineCache.has(cacheKey)) return klineCache.get(cacheKey);
@@ -635,6 +795,12 @@ async function loadYearlyDouble() {
     const empty = document.getElementById('yearly-double-empty');
     const wrap = document.getElementById('yearly-double-table-wrap');
     const body = document.getElementById('yearly-double-body');
+    const runBtn = document.getElementById('yearly-double-run');
+    if (runBtn) {
+        if (runBtn.disabled) return;
+        runBtn.disabled = true;
+        runBtn.textContent = '扫描中…';
+    }
     try {
         const response = await fetch('/api/yearly-double');
         const result = await response.json();
@@ -649,7 +815,7 @@ async function loadYearlyDouble() {
         body.innerHTML = result.items.map((r, index) => `
             <tr>
                 <td>${index + 1}</td>
-                <td class="code"><a href="${escapeHtml(r.eastmoney_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.st_code)}</a><button class="kline-trigger" onclick="openKline('${escapeHtml(r.st_code)}')">K线</button><button class="kline-preview-trigger" data-code="${escapeHtml(r.st_code)}" type="button">预览</button></td>
+                <td class="code"><a href="${escapeHtml(r.eastmoney_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.st_code)}</a><button class="kline-trigger" data-code="${escapeHtml(r.st_code)}" onclick="openKline('${escapeHtml(r.st_code)}', this)">K线</button><button class="kline-preview-trigger" data-code="${escapeHtml(r.st_code)}" type="button">预览</button></td>
                 <td>${escapeHtml(r.name)}</td>
                 <td>${escapeHtml(r.low_date)}</td>
                 <td>${Number(r.low_price).toFixed(2)}</td>
@@ -663,11 +829,16 @@ async function loadYearlyDouble() {
         empty.style.display = 'none';
         wrap.style.display = 'block';
         bindPreviewTriggers(wrap);
+        if (runBtn) runBtn.textContent = '重新扫描';
     } catch (error) {
         empty.textContent = error.message;
+        empty.style.display = 'block';
+        if (runBtn) runBtn.textContent = '扫描年度翻倍股';
+    } finally {
+        if (runBtn) runBtn.disabled = false;
     }
 }
-loadYearlyDouble();
+// 年度翻倍股默认不查询，仅在点击面板内按钮后触发
 let suggestTimer = null;
 let latestCandidates = [];
 let activeSuggestIndex = -1;
