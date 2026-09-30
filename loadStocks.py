@@ -92,52 +92,60 @@ def loadAllBasic(df=None):
 				db.rollback()
 	db.close()
 
-#输入：DF数据帧，开始日期和结束日期。在此之间的交易记录导入数据库
+#输入：开始日期和结束日期，在此之间的交易记录按交易日批量导入数据库。
+#df 参数保留以兼容既有调用方，拉取范围实际由 start_date/end_date 决定。
 def insertNewTransactonRecordForAllStocks(df=None,start_date='',end_date=''):
-	l=len(df)
+	"""按交易日批量拉取区间日线并入库。
+
+	原实现逐只调用 pro.daily(ts_code=...)：区间内每只股票各一次调用，全市场 5895 只
+	就是 5895 次，且每次 time.sleep(1.5) 限速（约 2.5 小时），是 tushare daily 配额
+	（20000 次/天）的主要消耗源。
+	改为 pro.daily(trade_date=...) 后每个交易日只调用一次即可拿到全市场当日数据，
+	调用次数从"股票数"降到"交易日数"，同时不再需要逐只限速。
+	"""
 	db=connectDB()
 	cursor=db.cursor()
 	pro = ts.pro_api(TUSHARE_TOKEN)
-	for k in range(0,l):
-		try:
-			data=pro.daily(ts_code=df.loc[k].ts_code,start_date=start_date,end_date=end_date)
-		except Exception as e:
-			print("获取日线数据异常 %s: %s" % (df.loc[k].ts_code, e))
-			time.sleep(5)
-			continue
-		if data is None or len(data) == 0:
-			continue
-		ln=len(data)
-		sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
-		for i in range(0,ln):
-			try:
-					cursor.execute(sql, (df.loc[k].ts_code,df.loc[k].symbol,
-						data.loc[i].trade_date,
-						float(data.loc[i].open),
-						float(data.loc[i].high),
-						float(data.loc[i].low),
-						float(data.loc[i].close),
-						float(data.loc[i].pre_close),
-						float(data.loc[i].change),
-						float(data.loc[i].pct_chg),
-						float(data.loc[i].vol),
-						float(data.loc[i].amount),
-					))
-					if i % 50 == 0:
-						db.commit()
-						print(i, " records have been loaded to database")
-					if i == ln-1:
-						db.commit()
-						print(i, " All records have been loaded to database")
-			except Exception as e:
-				print("插入交易记录异常 %s %s: %s" % (df.loc[k].symbol, data.loc[i].trade_date, e))
-				db.rollback()
-		if k % 50 == 0:
-			print(k, " tables have been processed")
-		if k == l-1:
-			print(k, " All tables have been processed")
-		time.sleep(1.5)  # 限速：pro.daily()限制50次/分钟
-	db.close()
+	# 生成区间内的工作日；周末直接排除，法定休市日由 daily 返回空集自然跳过。
+	day=datetime.date(int(start_date[:4]),int(start_date[4:6]),int(start_date[6:8]))
+	end_day=datetime.date(int(end_date[:4]),int(end_date[4:6]),int(end_date[6:8]))
+	pending_dates=[]
+	while day<=end_day:
+		if day.weekday()<5:
+			pending_dates.append(day.strftime('%Y%m%d'))
+		day+=datetime.timedelta(days=1)
+	sql="INSERT INTO st_daily(ts_code,symbol,trade_date,openp,high,low,closep,preclose,changes,pct_chg,vol,amount) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE openp=VALUES(openp),high=VALUES(high),low=VALUES(low),closep=VALUES(closep),preclose=VALUES(preclose),changes=VALUES(changes),pct_chg=VALUES(pct_chg),vol=VALUES(vol),amount=VALUES(amount)"
+	total_rows=0
+	try:
+		for trade_date in pending_dates:
+			data=None
+			for retry in range(3):
+				try:
+					data=pro.daily(trade_date=trade_date)
+					break
+				except Exception as e:
+					if _is_quota_error(e):
+						raise RuntimeError('tushare daily 配额超限，停止日线更新: %s' % e)
+					print("API异常(重试%d/3) %s: %s"%(retry+1,trade_date,e))
+					time.sleep(5)
+			if data is None or data.empty:
+				print(time.ctime(),trade_date,'returned no daily data')
+				continue
+			rows=[(
+				str(row.ts_code),str(row.ts_code).split('.')[0],str(row.trade_date),
+				float(row.open),float(row.high),float(row.low),float(row.close),
+				float(row.pre_close),float(row.change),float(row.pct_chg),
+				float(row.vol),float(row.amount)
+			) for row in data.itertuples(index=False)]
+			cursor.executemany(sql,rows)
+			db.commit()
+			total_rows+=len(rows)
+			print(time.ctime(),'%s: %d rows upserted'%(trade_date,len(rows)))
+		print(time.ctime(),'batch daily update done: %d dates, %d rows'%(
+			len(pending_dates),total_rows))
+	finally:
+		cursor.close()
+		db.close()
 
 
 #获取给定日期段内阶段涨幅大于rate的股票，返回一个股票列表list
@@ -150,6 +158,13 @@ def getJDZF(df='',start_date='',end_date='',rate=''):
 	lst=[r[0] for r in cursor.fetchall()]
 	db.close()
 	return lst
+
+
+# 判断 tushare 返回的是否为配额/权限类错误。
+# 这类错误重试必然失败，必须立即中止而非静默当作"当日无数据"。
+def _is_quota_error(e):
+	msg = str(e)
+	return ('超限' in msg) or ('权限' in msg and '不足' in msg) or ('积分' in msg)
 
 
 # 增量加载日线数据：按交易日批量获取全市场数据并批量入库。
@@ -189,6 +204,11 @@ def incrementalUpdateDailyData(df=None, lookback_days=30):
 					data=pro.daily(trade_date=trade_date)
 					break
 				except Exception as e:
+					if _is_quota_error(e):
+						# 配额/权限类错误重试无意义。若放任它被下面的
+						# `data is None` 分支当成"当日无数据"跳过，最终会以
+						# 0 rows 正常结束，把真实的配额耗尽伪装成成功。
+						raise RuntimeError('tushare daily 配额超限，停止日线更新: %s' % e)
 					print("API异常(重试%d/3) %s: %s"%(retry+1,trade_date,e))
 					time.sleep(5)
 			if data is None or data.empty:

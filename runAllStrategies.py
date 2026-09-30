@@ -26,7 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def is_a_share_trading_day(day=None):
-    """判断策略对应日期是否为 A 股交易日。"""
+    """判断策略对应日期是否为 A 股交易日。
+
+    改为查询本地 st_daily，不再调用 tushare trade_cal（1次/小时）：
+    该接口一旦超限，原来会直接导致全部 8 个策略被跳过。
+    本地最新交易日等于目标日，即表示"该日是交易日且日线已入库"，
+    比交易日历更贴近策略的真实前提——没有当日数据时跑策略也只会得到过时结果。
+    """
     day = day or datetime.date.today()
     if day.weekday() >= 5:
         logger.info("%s 是周末，跳过策略筛选", day.strftime('%Y-%m-%d'))
@@ -34,19 +40,21 @@ def is_a_share_trading_day(day=None):
 
     date_str = day.strftime('%Y%m%d')
     try:
-        pro = ts.pro_api(ld.TUSHARE_TOKEN)
-        calendar = pro.trade_cal(
-            exchange='SSE', start_date=date_str, end_date=date_str,
-            fields='cal_date,is_open')
-        if calendar is None or calendar.empty:
-            logger.warning("未取得 %s 的交易日历，保守跳过本次策略筛选", date_str)
-            return False
-        is_open = int(calendar.iloc[0]['is_open']) == 1
-        if not is_open:
-            logger.info("%s 是 A 股休市日，跳过策略筛选", day.strftime('%Y-%m-%d'))
-        return is_open
+        db = ld.connectDB()
+        try:
+            cursor = db.cursor()
+            cursor.execute("SELECT MAX(trade_date) FROM st_daily")
+            latest = cursor.fetchone()[0]
+            cursor.close()
+        finally:
+            db.close()
+        if latest == date_str:
+            return True
+        logger.info("本地最新交易日为 %s，尚无 %s 的日线数据（休市或日线未更新），跳过策略筛选",
+                    latest, date_str)
+        return False
     except Exception as exc:
-        logger.error("查询 %s 交易日历失败，保守跳过本次策略筛选: %s", date_str, exc)
+        logger.error("读取本地交易日失败，保守跳过本次策略筛选: %s", exc)
         return False
 
 
