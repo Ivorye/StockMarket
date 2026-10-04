@@ -1,0 +1,5 @@
+logs/daily_update.log
+logs/strategies.log
+server_err.log
+server_out.log
+output/signals_*.csv
