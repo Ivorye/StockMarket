@@ -531,7 +531,7 @@
 
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" tabindex="-1" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
-        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>▲</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>▼</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+        <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>–</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>–</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
         <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
     </section>
 </div>
@@ -621,14 +621,31 @@ function setKlineNav(triggerEl, code) {
 function updateKlineNav() {
     const prev = document.getElementById('stock-prev');
     const next = document.getElementById('stock-next');
-    prev.disabled = klineNavIndex <= 0;
-    next.disabled = klineNavIndex < 0 || klineNavIndex >= klineNavCodes.length - 1;
+    const n = klineNavCodes.length;
+    const hasNav = n > 0 && klineNavIndex >= 0;
+    prev.disabled = !hasNav;
+    next.disabled = !hasNav;
+    if (!hasNav) {
+        prev.textContent = next.textContent = '–';
+        prev.title = next.title = '';
+        prev.setAttribute('aria-label', '上一只股票（PgUp）');
+        next.setAttribute('aria-label', '下一只股票（PgDn）');
+        return;
+    }
+    // 到顶/到底循环，按钮显示跳转后的目标序号（1 基）
+    const p = (klineNavIndex - 1 + n) % n;
+    const x = (klineNavIndex + 1) % n;
+    prev.textContent = p + 1;
+    next.textContent = x + 1;
+    prev.title = `上一只：第${p + 1}支（共${n}支，PgUp）`;
+    next.title = `下一只：第${x + 1}支（共${n}支，PgDn）`;
+    prev.setAttribute('aria-label', `上一只股票，第${p + 1}支（共${n}支）`);
+    next.setAttribute('aria-label', `下一只股票，第${x + 1}支（共${n}支）`);
 }
 async function stepKlineStock(delta) {
-    if (!klineNavCodes.length) return;
-    const next = klineNavIndex + delta;
-    if (next < 0 || next >= klineNavCodes.length) return;
-    klineNavIndex = next;
+    const n = klineNavCodes.length;
+    if (!n || klineNavIndex < 0) return;
+    klineNavIndex = (klineNavIndex + delta + n) % n;
     updateKlineNav();
     await openKline(klineNavCodes[klineNavIndex], null, true);
 }
