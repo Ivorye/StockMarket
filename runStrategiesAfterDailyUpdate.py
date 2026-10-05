@@ -4,6 +4,13 @@ import os
 import subprocess
 import sys
 
+# 计划任务运行在 cp1252 控制台下，中文 logger 输出会抛 UnicodeEncodeError 并刷屏
+# Logging error。统一改用 UTF-8，必须在 StreamHandler 创建前执行。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)

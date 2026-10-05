@@ -6,6 +6,15 @@ import sys
 import loadStocks as ld
 import stockPolicy as sp
 
+# 计划任务运行在 cp1252 控制台下，中文 print/logger 输出会抛 UnicodeEncodeError。
+# 该异常会从 loadStocks 的 except 分支逃逸，导致 run_daily_update 提前 return、
+# 后续步骤全部跳过。这里统一改用 UTF-8 并容错，必须在 StreamHandler 创建前执行。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 # 创建logs目录
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(log_dir, exist_ok=True)
@@ -35,12 +44,17 @@ def is_a_share_trading_day(day=None):
 
 
 def run_daily_update():
-    """每日数据更新流程：获取股票列表（优先DB）→ 载入总表 → 为新股建表 → 加载近期日线数据"""
+    """每日数据更新流程：获取股票列表（优先DB）→ 载入总表 → 为新股建表 → 加载近期日线数据
+
+    返回 True 表示本次执行成功（含"非交易日正常跳过"），False 表示失败。
+    调用方据此决定进程退出码，计划任务的 LastResult 才会如实反映执行结果，
+    下游策略任务的依赖检查也才能正确判定是否跳过。
+    """
     logger.info("========== 每日数据更新开始 ==========")
 
     if not is_a_share_trading_day():
         logger.info("========== 非交易日，本次任务结束 ==========")
-        return
+        return True
 
     # 步骤1：获取股票列表（优先从数据库读取，避免消耗stock_basic API配额）
     logger.info("[1/6] 获取股票列表...")
@@ -49,7 +63,7 @@ def run_daily_update():
         logger.info(f"从API获取到 {len(df)} 只股票基本信息")
     except Exception as e:
         logger.error(f"getStockBasic 执行失败: {e}")
-        return
+        return False
 
     # 步骤2：将所有股票基本信息载入总表
     logger.info("[2/6] 载入股票基本信息到总表 (loadAllBasic)...")
@@ -58,7 +72,7 @@ def run_daily_update():
         logger.info("股票基本信息载入完成")
     except Exception as e:
         logger.error(f"loadAllBasic 执行失败: {e}")
-        return
+        return False
 
     # 步骤3：确保统一日线表存在
     logger.info("[3/6] 确保 st_daily 日线表存在...")
@@ -67,7 +81,7 @@ def run_daily_update():
         logger.info("st_daily 表检查完成")
     except Exception as e:
         logger.error(f"createStockTable 执行失败: {e}")
-        return
+        return False
 
     # 步骤4：增量加载日线数据（只补缺失天数，已存在的记录会跳过）
     logger.info("[4/6] 增量加载日线数据...")
@@ -76,7 +90,7 @@ def run_daily_update():
         logger.info("日线数据加载完成")
     except Exception as e:
         logger.error(f"日线数据加载失败: {e}")
-        return
+        return False
 
     # 步骤5：确认统一日线表可用（步骤4已直接写入）
     logger.info("[5/6] 检查 st_daily 日线表...")
@@ -86,7 +100,7 @@ def run_daily_update():
         logger.info("st_daily汇总完成")
     except Exception as e:
         logger.error(f"st_daily汇总失败: {e}")
-        return
+        return False
 
     # 步骤6：执行放量涨幅筛选
     logger.info("[6/6] 执行放量涨幅筛选...")
@@ -96,9 +110,11 @@ def run_daily_update():
         logger.info(f"放量涨幅筛选完成，命中 {len(result)} 只股票")
     except Exception as e:
         logger.error(f"放量涨幅筛选失败: {e}")
+        return False
 
     logger.info("========== 每日数据更新完成 ==========")
+    return True
 
 
 if __name__ == '__main__':
-    run_daily_update()
+    sys.exit(0 if run_daily_update() else 1)

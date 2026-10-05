@@ -6,33 +6,11 @@ import datetime
 import os
 import csv
 import mysql.connector
+import db_utils
 
 TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
 
-def _check_execution_status(task_name):
-	"""检查任务是否已成功执行过"""
-	try:
-		mdb=_connect_sm()
-		mycsr=mdb.cursor()
-		mycsr.execute("SELECT status FROM st_execution_status WHERE task_name=%s",(task_name,))
-		row=mycsr.fetchone()
-		mycsr.close();mdb.close()
-		return row and row[0]=='Y'
-	except Exception:
-		return False
 
-def _update_execution_status(task_name, status='Y'):
-	"""更新任务执行状态"""
-	try:
-		mdb=_connect_sm()
-		mycsr=mdb.cursor()
-		today=datetime.date.today().strftime('%Y%m%d')
-		sql="INSERT INTO st_execution_status(task_name,exec_date,status) VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE exec_date=%s,status=%s"
-		mycsr.execute(sql,(task_name,today,status,today,status))
-		mdb.commit()
-		mycsr.close();mdb.close()
-	except Exception as e:
-		print(f'更新执行状态失败: {e}')
 
 #延迟加载：优先从stocks表读取，回退到tushare API
 _basic_cache = None
@@ -47,9 +25,9 @@ def _get_stock_basic():
 		mycsr.execute("SELECT COUNT(*) FROM stocks")
 		cnt=mycsr.fetchone()[0]
 		if cnt>0:
-			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
 			rows=mycsr.fetchall()
-			df=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+			df=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
 			_basic_cache=df
 			mycsr.close();mdb.close()
 			return _basic_cache
@@ -62,18 +40,20 @@ def _get_stock_basic():
 		_basic_cache = pro.query('stock_basic')
 		#缓存到stocks表
 		_store_to_stocks(_basic_cache)
-		_update_execution_status('stock_basic','Y')
+		today_date = datetime.date.today().strftime('%Y%m%d')
+		db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='mysql.connector')
 		return _basic_cache
 	except Exception as e:
-		if _check_execution_status('stock_basic'):
+		today_date = datetime.date.today().strftime('%Y%m%d')
+		if db_utils.check_execution_status('stock_basic', exec_date=today_date, driver='mysql.connector'):
 			print('tushare API失败，st_execution_status状态为Y，从stocks表重试读取')
 			mdb=_connect_sm()
 			mycsr=mdb.cursor()
-			mycsr.execute("SELECT st_code AS ts_code,symbol,fullname AS name,list_date FROM stocks")
+			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
 			rows=mycsr.fetchall()
 			mycsr.close();mdb.close()
 			if rows:
-				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','list_date'])
+				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
 				return _basic_cache
 		print('tushare API失败且无成功执行记录: %s'%e)
 		raise
@@ -81,10 +61,10 @@ def _get_stock_basic():
 def _store_to_stocks(df):
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
-	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,fullname,list_date) VALUES(%s,%s,%s,%s,%s)"
+	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,name,fullname,list_date) VALUES(%s,%s,%s,%s,%s,%s)"
 	for i in range(len(df)):
 		try:
-			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].list_date))
+			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].fullname,df.iloc[i].list_date))
 		except Exception:
 			pass
 		if i%500==499:
@@ -547,6 +527,299 @@ def getSmoothUptrend(trading_days=30, min_gain_pct=30, min_r_squared=0.8,
 	return codes
 
 
+#========== 上升旗形（Bull Flag）策略 ==========
+#形态定义（须完整落在最近 trading_days 个交易日内）：
+#  旗杆：窗口前段急涨，全窗口最高价所在的bar记为 p
+#  旗面：p 之后的整理段，高点不创新高、区间收窄、量能萎缩
+#筛选要点：
+#  1. p 左侧至少 pole_min_bars 根、右侧至少 flag_min_bars 根，形态尚未走完
+#  2. 旗杆涨幅>=min_pole_gain%，且杆内低点出现在前40%（急涨而非长期缓涨）
+#  3. 旗面回撤介于 min_retrace~max_retrace，既非横盘也非已破位
+#  4. 旗面宽度<=max_flag_range%，高点斜率<=flag_max_slope%/bar（旗面下倾或走平）
+#  5. 旗面均量<=旗杆均量*max_vol_ratio（缩量整理）
+#  6. 最新收盘位于旗面高度的 min_close_pos% 以上（仍在旗内、未深跌）
+
+def _lin_slope(values):
+	"""最小二乘斜率，values 按时间由旧到新。"""
+	n = len(values)
+	if n < 2:
+		return 0.0
+	x_mean = (n - 1) / 2
+	y_mean = sum(values) / n
+	ss_x = sum((x - x_mean) ** 2 for x in range(n))
+	if ss_x == 0:
+		return 0.0
+	return sum((x - x_mean) * (values[x] - y_mean) for x in range(n)) / ss_x
+
+
+def _bull_flag_metrics(bars, pole_min_bars=2, flag_min_bars=3, min_pole_gain=15,
+		min_retrace=5, max_retrace=45, max_flag_range=25, flag_max_slope=0.5,
+		max_vol_ratio=0.7, min_close_pos=30):
+	"""识别单只股票的上升旗形。bars 按时间由旧到新，每项含 d/h/l/c/v/p。
+	命中返回指标 dict，未命中返回 None。"""
+	n = len(bars)
+	if n < pole_min_bars + flag_min_bars:
+		return None
+	try:
+		highs = [float(b['h']) for b in bars]
+		lows = [float(b['l']) for b in bars]
+		closes = [float(b['c']) for b in bars]
+		vols = [float(b['v'] or 0) for b in bars]
+	except (TypeError, ValueError):
+		return None
+	if any(h <= 0 or l <= 0 for h, l in zip(highs, lows)):
+		return None
+
+	p = highs.index(max(highs))          # 旗杆顶（其后高点均不创新高）
+	flag_n = n - 1 - p
+	if p < pole_min_bars or flag_n < flag_min_bars:
+		return None
+
+	# ---- 旗杆 ----
+	pole_lows = lows[:p + 1]
+	pole_low = min(pole_lows)
+	pole_high = highs[p]
+	if pole_high <= pole_low:
+		return None
+	pole_gain = (pole_high - pole_low) / pole_low * 100
+	if pole_gain < min_pole_gain:
+		return None
+	if pole_lows.index(pole_low) > p * 0.4:
+		return None
+
+	# ---- 旗面 ----
+	flag_highs = highs[p + 1:]
+	flag_lows = lows[p + 1:]
+	flag_high = max(flag_highs)
+	flag_low = min(flag_lows)
+	if flag_low <= pole_low:             # 跌回起点即形态失败
+		return None
+	retrace = (pole_high - flag_low) / pole_high * 100
+	if retrace < min_retrace or retrace > max_retrace:
+		return None
+	flag_range = (flag_high - flag_low) / pole_high * 100
+	if flag_range > max_flag_range:
+		return None
+	high_slope = _lin_slope(flag_highs) / pole_high * 100   # 每bar斜率，相对旗杆顶%
+	low_slope = _lin_slope(flag_lows) / pole_high * 100
+	if high_slope > flag_max_slope or low_slope > flag_max_slope:
+		return None
+
+	# ---- 量能 ----
+	pole_vol = sum(vols[:p + 1]) / (p + 1)
+	flag_vol = sum(vols[p + 1:]) / flag_n
+	if pole_vol > 0 and flag_vol > pole_vol * max_vol_ratio:
+		return None
+	vol_dry = flag_vol / pole_vol * 100 if pole_vol > 0 else 0.0
+
+	# ---- 末端位置 ----
+	if flag_high <= flag_low:
+		return None
+	close_pos = (closes[-1] - flag_low) / (flag_high - flag_low) * 100
+	if close_pos < min_close_pos:
+		return None
+
+	last = bars[-1]
+	return {
+		'pole_bars': p + 1,
+		'flag_bars': flag_n,
+		'pole_gain_pct': round(pole_gain, 2),
+		'retrace_pct': round(retrace, 2),
+		'flag_range_pct': round(flag_range, 2),
+		'flag_high_slope_pct': round(high_slope, 3),
+		'flag_low_slope_pct': round(low_slope, 3),
+		'vol_dry_pct': round(vol_dry, 1),
+		'close_pos_pct': round(close_pos, 1),
+		'pole_high': round(pole_high, 2),
+		'flag_low': round(flag_low, 2),
+		'last_close': round(closes[-1], 2),
+		'trade_date': last['d'],
+		'pct_chg': round(float(last['p']), 2) if last.get('p') is not None else 0.0,
+	}
+
+
+def scanBullFlag(trading_days=10, endDate='', **criteria):
+	"""扫描最近 trading_days 个交易日内成型的上升旗形，返回指标列表（不写库）。"""
+	if trading_days < 6:
+		raise ValueError('trading_days must be at least 6')
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	if endDate:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<=%s ORDER BY trade_date DESC LIMIT %s", (endDate, trading_days))
+	else:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT %s", (trading_days,))
+	dates = [row[0] for row in mycsr.fetchall()]
+	if len(dates) < trading_days:
+		mycsr.close();mdb.close()
+		print(f'st_daily has fewer than {trading_days} trading days')
+		return []
+	dates.reverse()
+	start_date = dates[0]
+	placeholders = ','.join(['%s'] * len(dates))
+	mycsr.execute("SELECT ts_code,trade_date,high,low,closep,vol,pct_chg FROM st_daily "
+		f"WHERE trade_date IN ({placeholders}) ORDER BY ts_code,trade_date", tuple(dates))
+	bars_by_code = {}
+	for ts_code, trade_date, high, low, closep, vol, pct_chg in mycsr.fetchall():
+		bars_by_code.setdefault(ts_code, []).append({
+			'd': trade_date, 'h': high, 'l': low, 'c': closep,
+			'v': vol, 'p': pct_chg,
+		})
+	mycsr.close();mdb.close()
+	df = _get_stock_basic()
+	ts_to_idx = {df.ts_code[i]: i for i in range(len(df))}
+	result = []
+	for ts_code, bars in bars_by_code.items():
+		if len(bars) != trading_days:      # 中途停牌/新股，不足整段窗口则跳过
+			continue
+		idx = ts_to_idx.get(ts_code)
+		if idx is None or _should_skip(df, idx, start_date):
+			continue
+		metrics = _bull_flag_metrics(bars, **criteria)
+		if not metrics:
+			continue
+		metrics['st_code'] = ts_code
+		name = df.name[idx]
+		metrics['name'] = '' if name != name else str(name)   # NaN -> ''
+		result.append(metrics)
+	result.sort(key=lambda x: (x['close_pos_pct'], x['pole_gain_pct']), reverse=True)
+	return result
+
+
+def getBullFlag(trading_days=10, endDate='', **criteria):
+	"""筛选最近 trading_days 个交易日内出现上升旗形的股票，并写入信号表。"""
+	result = scanBullFlag(trading_days=trading_days, endDate=endDate, **criteria)
+	codes = [item['st_code'] for item in result]
+	for item in result:
+		print(item['st_code'], '杆涨:%.2f%% 回撤:%.2f%% 旗宽:%.2f%% 量缩至:%.1f%% 末端:%.0f%%' % (
+			item['pole_gain_pct'], item['retrace_pct'], item['flag_range_pct'],
+			item['vol_dry_pct'], item['close_pos_pct']))
+	if codes:
+		_write_signal(codes, f'{trading_days}日上升旗形', result[0]['trade_date'])
+	return codes
+
+
+#========== 小旗杆策略 ==========
+#旗杆日(Day1)：单日涨幅>min_pct_chg%，且成交量>=前prev_vol_days日均量*vol_multiple
+#整理期：Day1 之后的3~5个交易日内，所有收盘价必须>= Day1开盘价*(1+floor_pct/100)
+#十字星：|收-开|/(高-低)<=doji_ratio，仅作形态标注，不参与筛选
+#数据窗口：prev_vol_days(算均量) + lookback(找旗杆日) + max_hold_days(整理期)
+
+def _is_doji(bar, doji_ratio=0.25):
+	"""实体占振幅的比例<=doji_ratio 判为十字星；振幅为0视为十字星。"""
+	o, h, l, c = float(bar['o']), float(bar['h']), float(bar['l']), float(bar['c'])
+	rng = h - l
+	if rng <= 0:
+		return True
+	return abs(c - o) / rng <= doji_ratio
+
+
+def scanSmallPole(lookback=10, prev_vol_days=5, min_pct_chg=8, vol_multiple=3,
+		min_hold_days=3, max_hold_days=5, floor_pct=3, doji_ratio=0.25, endDate=''):
+	"""扫描小旗杆形态，返回指标列表（不写库）。"""
+	need = lookback + prev_vol_days
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	if endDate:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<=%s ORDER BY trade_date DESC LIMIT %s", (endDate, need))
+	else:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT %s", (need,))
+	dates = [row[0] for row in mycsr.fetchall()]
+	if len(dates) < need:
+		mycsr.close();mdb.close()
+		print(f'st_daily has fewer than {need} trading days')
+		return []
+	dates.reverse()
+	start_date = dates[prev_vol_days]   # 旗杆日可选范围的起点
+	placeholders = ','.join(['%s'] * len(dates))
+	mycsr.execute("SELECT ts_code,trade_date,openp,high,low,closep,vol,pct_chg FROM st_daily "
+		f"WHERE trade_date IN ({placeholders}) ORDER BY ts_code,trade_date", tuple(dates))
+	rows_by_code = {}
+	for ts_code, trade_date, openp, high, low, closep, vol, pct_chg in mycsr.fetchall():
+		rows_by_code.setdefault(ts_code, []).append({
+			'd': trade_date, 'o': openp, 'h': high, 'l': low, 'c': closep,
+			'v': float(vol or 0), 'p': pct_chg,
+		})
+	mycsr.close();mdb.close()
+	df = _get_stock_basic()
+	ts_to_idx = {df.ts_code[i]: i for i in range(len(df))}
+
+	result = []
+	for ts_code, rows in rows_by_code.items():
+		idx = ts_to_idx.get(ts_code)
+		if idx is None or _should_skip(df, idx, start_date):
+			continue
+		by_date = {}
+		for r in rows:
+			by_date[r['d']] = r
+		if len(by_date) != len(rows):
+			continue
+		hit = None
+		for i in range(prev_vol_days, len(dates)):
+			d1 = by_date.get(dates[i])
+			if d1 is None:
+				continue
+			# 旗杆日：涨幅 + 相对前5日均量的放量倍数
+			if d1['p'] is None or float(d1['p']) <= min_pct_chg:
+				continue
+			prev = [by_date.get(dates[j]) for j in range(i - prev_vol_days, i)]
+			if any(x is None for x in prev):
+				continue
+			avg_vol = sum(x['v'] for x in prev) / prev_vol_days
+			if avg_vol <= 0 or d1['v'] < avg_vol * vol_multiple:
+				continue
+			# 整理期：最多取 max_hold_days 天，至少要有 min_hold_days 天
+			follow = [by_date.get(dates[j]) for j in
+					  range(i + 1, min(i + 1 + max_hold_days, len(dates)))]
+			if any(x is None for x in follow):
+				continue
+			if len(follow) < min_hold_days:
+				continue
+			# 硬性地板价：整理期所有收盘 >= 旗杆日开盘*(1+floor_pct/100)
+			floor_price = float(d1['o']) * (1 + floor_pct / 100)
+			min_close = min(float(x['c']) for x in follow)
+			if min_close < floor_price:
+				continue
+			doji_days = sum(1 for x in follow if _is_doji(x, doji_ratio))
+			last_close = float(follow[-1]['c'])
+			hit = {
+				'trade_date': d1['d'],
+				'pct_chg': round(float(d1['p']), 2),
+				'vol_ratio': round(d1['v'] / avg_vol, 2),
+				'day1_open': round(float(d1['o']), 2),
+				'day1_close': round(float(d1['c']), 2),
+				'floor_price': round(floor_price, 2),
+				'hold_days': len(follow),
+				'min_close': round(min_close, 2),
+				'safe_margin_pct': round((min_close / floor_price - 1) * 100, 2),
+				'doji_days': doji_days,
+				'last_close': round(last_close, 2),
+				'follow_return_pct': round((last_close / float(d1['c']) - 1) * 100, 2),
+			}
+			break                      # 每只股票只保留最近一次旗杆日
+		if hit:
+			hit['st_code'] = ts_code
+			name = df.name[idx]
+			hit['name'] = '' if name != name else str(name)
+			result.append(hit)
+	result.sort(key=lambda x: (x['trade_date'], x['vol_ratio']), reverse=True)
+	return result
+
+
+def getSmallPole(**params):
+	"""筛选小旗杆形态股票，写入信号表（按各自旗杆日分组写入）。"""
+	result = scanSmallPole(**params)
+	for item in result:
+		print(item['st_code'], '旗杆日%s 涨%.2f%% 放量%.1f倍 整理%d天 最低收%.2f(地板%.2f 安全垫%.2f%%) 十字星%d根' % (
+			item['trade_date'], item['pct_chg'], item['vol_ratio'], item['hold_days'],
+			item['min_close'], item['floor_price'], item['safe_margin_pct'], item['doji_days']))
+	by_date = {}
+	for item in result:
+		by_date.setdefault(item['trade_date'], []).append(item['st_code'])
+	for trade_date, codes in by_date.items():
+		_write_signal(codes, '小旗杆', trade_date)
+	return [item['st_code'] for item in result]
+
+
 def getlistgupiao(file):
 	if(file is None or file == ''):
 		print('file must be input');return
@@ -561,6 +834,17 @@ def getlistgupiao(file):
 #========== 放量涨幅筛选（st_daily_signal）==========
 
 #创建 st_daily 表（汇总所有个股日线数据）
+def ensureStocksNameColumn():
+	"""给stocks表补上name(简称)列，已存在则跳过"""
+	try:
+		mdb=_connect_sm()
+		mycsr=mdb.cursor()
+		mycsr.execute("ALTER TABLE stocks ADD COLUMN name VARCHAR(50) DEFAULT '' AFTER symbol")
+		mdb.commit()
+		mycsr.close();mdb.close()
+	except Exception:
+		pass
+
 def createDailyTable():
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
