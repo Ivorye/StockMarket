@@ -20,8 +20,10 @@ templates = Jinja2Templates(env=_env)
 @app.on_event("startup")
 def _init_db():
     import stockPolicy as sp
+    import announcements as ann
     sp.createSignalTable()
     sp.ensureStocksNameColumn()
+    ann.createAnnouncementTable()
 
 
 # 内存缓存: {cache_key: (timestamp, data)}
@@ -609,3 +611,18 @@ async def shift_kline_data(st_code: str, end_date: str, direction: int, days: in
     if not row:
         return JSONResponse({"error": "已到可用交易日邊界"}, status_code=404)
     return await kline_data(st_code, days, row[0])
+
+
+# def 而非 async：内部含东财 HTTP 拉取与 DB 查询，交给线程池避免阻塞事件循环
+@app.get("/api/messages/{st_code}/{ann_date}", tags=["data"])
+def stock_messages(st_code: str, ann_date: str, refresh: int = 0):
+    """取指定股票某日的公告（K 线旗杆日图标悬停时调用）。"""
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code) or not re.fullmatch(r"\d{8}", ann_date):
+        return JSONResponse({"error": "参数不正确"}, status_code=400)
+    import announcements as ann
+    try:
+        items = ann.getMessages(st_code, ann_date, refresh=bool(refresh))
+    except Exception as exc:
+        return JSONResponse({"error": f"公告查询失败: {exc}"}, status_code=502)
+    return {"st_code": st_code, "date": ann_date, "items": items}

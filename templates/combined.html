@@ -82,6 +82,14 @@
         .chart-stage { position: relative; height: 480px; border: 1px solid #eee; background: #fff; }
         #kline-canvas { width: 100%; height: 100%; display: block; }
         .chart-status { position: absolute; inset: 0; display: grid; place-items: center; color: #888; background: rgba(255,255,255,.92); }
+        .kline-msg { position: absolute; z-index: 6; max-width: 330px; min-width: 190px; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.98); box-shadow: 0 6px 20px rgba(0,0,0,.16); color: #333; font-size: 12px; line-height: 1.5; }
+        .kline-msg[hidden] { display: none; }
+        .kline-msg-title { margin-bottom: 4px; color: #d46b08; font-weight: 600; }
+        .kline-msg ul { margin: 0; padding-left: 16px; max-height: 190px; overflow-y: auto; }
+        .kline-msg li { margin: 3px 0; }
+        .kline-msg a { color: #1677ff; text-decoration: none; }
+        .kline-msg a:hover { text-decoration: underline; }
+        .kline-msg-empty { color: #999; }
         .kline-preview { display: none; position: fixed; z-index: 1100; width: 430px; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.18); pointer-events: none; }
         .kline-preview.open { display: block; }
         .preview-title { margin-bottom: 6px; color: #333; font-size: 12px; font-weight: 600; }
@@ -284,7 +292,7 @@
                 <th>首日开盘</th><th>地板价</th><th>整理最低收</th><th>最新价</th></tr></thead>
             <tbody>{% for r in small_pole.records %}<tr>
                 <td>{{ loop.index }}</td>
-                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" data-flag-date="{{ r.trade_date }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                 <td>{{ r.name }}</td>
                 <td data-value="{{ r.trade_date }}">{{ r.trade_date }}</td>
                 <td class="metric" data-value="{{ r.pct_chg }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pct_chg) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pct_chg * 4, 100]|min }}%"></span></div></td>
@@ -532,7 +540,7 @@
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" tabindex="-1" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
         <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>–</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>–</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
-        <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div></div>
+            <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div><div class="kline-msg" id="kline-msg" role="tooltip" hidden></div></div>
     </section>
 </div>
 <div class="kline-preview" id="kline-preview" aria-hidden="true">
@@ -606,15 +614,27 @@ let previewRequest = null;
 const klineCache = new Map();
 let klineNavCodes = [];
 let klineNavIndex = -1;
+// 旗杆日图标 + 当天消息提示（仅小旗杆面板的 K 线按钮带 data-flag-date）
+let klineNavFlagDates = [];
+let currentFlagDate = '';      // 当前 K 线对应股票的旗杆日 YYYYMMDD，非小旗杆为空
+let flagIconHit = null;        // 主画布上小旗图标命中区 {x, y, r, index}
+let chartGeom = null;          // 主画布几何信息，供鼠标反查蜡烛序号
+let msgTimer = null;
+let msgLoadingKey = '';        // 正在请求中的 code|date，防重复发请求
+let msgShownKey = '';          // 已渲染的 code|date，防 mousemove 高频重建 DOM
+const msgCache = new Map();
+const msgBox = document.getElementById('kline-msg');
 // 记录来源列表（按当前排序后的 DOM 顺序），供 ▲▼ / PgUp/PgDn 切换上下只股票
 function setKlineNav(triggerEl, code) {
     const table = triggerEl && triggerEl.closest ? triggerEl.closest('table') : null;
     if (table) {
-        klineNavCodes = Array.from(table.querySelectorAll('.kline-trigger'))
-            .map(b => b.dataset.code || '').filter(Boolean);
+        const buttons = Array.from(table.querySelectorAll('.kline-trigger'))
+            .filter(b => b.dataset.code);
+        klineNavCodes = buttons.map(b => b.dataset.code);
+        klineNavFlagDates = buttons.map(b => b.dataset.flagDate || '');
         klineNavIndex = klineNavCodes.indexOf(code);
     } else {
-        klineNavCodes = []; klineNavIndex = -1;
+        klineNavCodes = []; klineNavFlagDates = []; klineNavIndex = -1;
     }
     updateKlineNav();
 }
@@ -646,6 +666,7 @@ async function stepKlineStock(delta) {
     const n = klineNavCodes.length;
     if (!n || klineNavIndex < 0) return;
     klineNavIndex = (klineNavIndex + delta + n) % n;
+    currentFlagDate = klineNavFlagDates[klineNavIndex] || '';
     updateKlineNav();
     await openKline(klineNavCodes[klineNavIndex], null, true);
 }
@@ -653,6 +674,9 @@ async function openKline(code, triggerEl, keepNav = false) {
     if (!keepNav) {
         setKlineNav(triggerEl, code);
         lastChartButton = triggerEl || document.activeElement;
+        // 只有小旗杆面板的按钮带 data-flag-date，其余来源（搜索/年度翻倍）无旗杆日
+        currentFlagDate = (triggerEl && triggerEl.dataset && triggerEl.dataset.flagDate) || '';
+        hideFlagMsg();
     }
     currentChartCode = code;
     if (!keepNav) currentChartDays = 120;
@@ -748,7 +772,7 @@ function updateRangeControls() {
     document.getElementById('range-more').disabled = currentChartDays >= 240;
     document.getElementById('range-less').disabled = currentChartDays <= 60;
 }
-function closeKline() { overlay.classList.remove('open'); if (lastChartButton) lastChartButton.focus(); }
+function closeKline() { overlay.classList.remove('open'); hideFlagMsg(); if (lastChartButton) lastChartButton.focus(); }
 document.addEventListener('keydown', event => {
     if (!overlay.classList.contains('open')) return;
     if (event.key === 'Escape') { closeKline(); return; }
@@ -958,8 +982,103 @@ function drawKline(items, targetCanvas = canvas) {
     items.forEach((d,i)=>{const x=left+step*(i+.5),up=d.close>=d.open,color=up?'#cf1322':'#389e0d';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(d.high));ctx.lineTo(x,y(d.low));ctx.stroke();const yo=y(Math.max(d.open,d.close)),bh=Math.max(1,Math.abs(y(d.open)-y(d.close)));ctx.fillRect(x-body/2,yo,body,bh);const vh=(d.volume/maxV)*(bottom-volTop);ctx.globalAlpha=.48;ctx.fillRect(x-body/2,bottom-vh,body,vh);ctx.globalAlpha=1;});
     ctx.fillStyle='#888'; const labels=[0,Math.floor((items.length-1)/2),items.length-1]; labels.forEach(i=>{const x=left+step*(i+.5);ctx.fillText(items[i].date.slice(4,6)+'-'+items[i].date.slice(6,8),x-15,h-8);});
     ctx.fillText('成交量',4,volTop+10);
+    // 旗杆日：高亮该日蜡烛，并在最高价上方画小旗图标（仅主画布，预览不画）
+    if (targetCanvas !== canvas) return;
+    chartGeom = {left, step, top, priceBottom, count: items.length};
+    flagIconHit = null;
+    if (!currentFlagDate) return;
+    const fi = items.findIndex(d => d.date === currentFlagDate);
+    if (fi < 0) return;
+    const fx = left + step * (fi + .5);
+    ctx.save();
+    ctx.fillStyle = 'rgba(250,140,22,.10)';
+    ctx.fillRect(fx - step / 2, top, step, priceBottom - top);
+    const ix = fx, iy = Math.max(top + 11, y(items[fi].high) - 19);
+    ctx.beginPath(); ctx.arc(ix, iy, 9.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.96)'; ctx.fill();
+    ctx.strokeStyle = '#fa8c16'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ix - 3.5, iy - 6.5); ctx.lineTo(ix - 3.5, iy + 6.5);
+    ctx.strokeStyle = '#d46b08'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ix - 3, iy - 6); ctx.lineTo(ix + 6, iy - 2.5);
+    ctx.lineTo(ix - 3, iy + 1); ctx.closePath();
+    ctx.fillStyle = '#fa8c16'; ctx.fill();
+    ctx.restore();
+    flagIconHit = {x: ix, y: iy, r: 10, index: fi};
 }
-window.addEventListener('resize', () => { if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
+// ---- 旗杆日悬停：展示当天重要消息（东财公告，按 code|date 缓存）----
+function fmtFlagDate(value) { return value ? `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}` : ''; }
+function hideFlagMsg() { clearTimeout(msgTimer); msgTimer = null; if (msgBox) msgBox.hidden = true; }
+function hideFlagMsgSoon() { if (!msgBox || msgBox.hidden) return; clearTimeout(msgTimer); msgTimer = setTimeout(hideFlagMsg, 140); }
+function positionFlagMsg() {
+    if (!msgBox || msgBox.hidden || !flagIconHit) return;
+    const width = msgBox.offsetWidth, height = msgBox.offsetHeight;
+    const stageW = msgBox.parentElement.clientWidth, stageH = msgBox.parentElement.clientHeight;
+    let leftPos = flagIconHit.x + 16, topPos = flagIconHit.y - 10;
+    if (leftPos + width > stageW - 6) leftPos = flagIconHit.x - width - 16;
+    leftPos = Math.max(6, Math.min(leftPos, stageW - width - 6));
+    topPos = Math.max(6, Math.min(topPos, stageH - height - 6));
+    msgBox.style.left = leftPos + 'px';
+    msgBox.style.top = topPos + 'px';
+}
+function renderFlagMsg(items, failedMessage = '') {
+    const head = `<div class="kline-msg-title">旗杆日 ${fmtFlagDate(currentFlagDate)} · 当天重要消息（${items.length}条）</div>`;
+    if (failedMessage) {
+        msgBox.innerHTML = head + `<div class="kline-msg-empty">消息加载失败：${escapeHtml(failedMessage)}</div>`;
+    } else if (!items.length) {
+        msgBox.innerHTML = head + '<div class="kline-msg-empty">当天没有公告</div>';
+    } else {
+        msgBox.innerHTML = head + '<ul>' + items.map(item =>
+            `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a></li>`
+        ).join('') + '</ul>';
+    }
+    msgShownKey = `${currentChartCode}|${currentFlagDate}`;
+    msgBox.hidden = false;
+    positionFlagMsg();
+}
+async function loadFlagMessages() {
+    const code = currentChartCode, day = currentFlagDate;
+    if (!code || !day) return;
+    const key = `${code}|${day}`;
+    if (msgCache.has(key)) { renderFlagMsg(msgCache.get(key)); return; }
+    if (msgLoadingKey === key) return;   // 同一条消息只发一次请求
+    msgLoadingKey = key;
+    msgBox.innerHTML = `<div class="kline-msg-title">旗杆日 ${fmtFlagDate(day)} · 当天重要消息</div><div class="kline-msg-empty">正在加载…</div>`;
+    msgBox.hidden = false;
+    positionFlagMsg();
+    try {
+        const response = await fetch(`/api/messages/${encodeURIComponent(code)}/${day}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '消息请求失败');
+        msgCache.set(key, data.items);
+        if (currentChartCode === code && currentFlagDate === day) renderFlagMsg(data.items);
+    } catch (error) {
+        if (currentChartCode === code && currentFlagDate === day) renderFlagMsg([], error.message);
+    } finally {
+        msgLoadingKey = '';
+    }
+}
+function showFlagMsg() {
+    clearTimeout(msgTimer); msgTimer = null;
+    // 已在展示同一股票同一日则不重复渲染，避免 mousemove 高频重建 DOM
+    if (msgShownKey === `${currentChartCode}|${currentFlagDate}` && !msgBox.hidden) return;
+    loadFlagMessages();
+}
+canvas.addEventListener('mousemove', event => {
+    if (!currentFlagDate || !chartGeom || !flagIconHit) { hideFlagMsgSoon(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+    const idx = Math.round((mx - chartGeom.left) / chartGeom.step - .5);
+    const onFlagDay = idx >= 0 && idx < chartGeom.count && idx === flagIconHit.index;
+    const onIcon = Math.hypot(mx - flagIconHit.x, my - flagIconHit.y) <= flagIconHit.r + 4;
+    if (onFlagDay || onIcon) showFlagMsg(); else hideFlagMsgSoon();
+});
+canvas.addEventListener('mouseleave', event => {
+    if (event.relatedTarget && msgBox.contains(event.relatedTarget)) return;
+    hideFlagMsgSoon();
+});
+msgBox.addEventListener('mouseenter', () => { clearTimeout(msgTimer); msgTimer = null; });
+msgBox.addEventListener('mouseleave', hideFlagMsg);
+window.addEventListener('resize', () => { hideFlagMsg(); if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
 </script>
 </body>
 </html>
