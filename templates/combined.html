@@ -45,6 +45,9 @@
         th { background: #fafafa; padding: 10px 14px; text-align: left; font-size: 13px; color: #666; border-bottom: 1px solid #f0f0f0; white-space: nowrap; position: sticky; top: 0; }
         td { padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
         tr:hover { background: #f5f7fa; }
+        tr.has-flag-msg,
+        tr.has-flag-msg:hover { background: #ffe2ef; }
+        tr.has-flag-msg td { background: transparent; }
         .code { font-family: "Cascadia Code", "Consolas", monospace; }
         .code a { color: #1677ff; text-decoration: none; }
         .code a:hover { text-decoration: underline; }
@@ -90,6 +93,9 @@
         .kline-msg a { color: #1677ff; text-decoration: none; }
         .kline-msg a:hover { text-decoration: underline; }
         .kline-msg-empty { color: #999; }
+        .row-msg { display: none; position: fixed; z-index: 1200; max-width: 330px; min-width: 190px; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.98); box-shadow: 0 6px 20px rgba(0,0,0,.16); color: #333; font-size: 12px; line-height: 1.5; }
+        .row-msg.open { display: block; }
+        .has-flag-msg td[data-value] { cursor: pointer; }
         .kline-preview { display: none; position: fixed; z-index: 1100; width: 430px; padding: 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.18); pointer-events: none; }
         .kline-preview.open { display: block; }
         .preview-title { margin-bottom: 6px; color: #333; font-size: 12px; font-weight: 600; }
@@ -290,11 +296,11 @@
                 <th class="sortable" tabindex="0" onclick="sortPole(8)" onkeydown="if(event.key==='Enter')sortPole(8)">十字星数 ↕</th>
                 <th class="sortable" tabindex="0" onclick="sortPole(9)" onkeydown="if(event.key==='Enter')sortPole(9)">整理涨跌 ↕</th>
                 <th>首日开盘</th><th>地板价</th><th>整理最低收</th><th>最新价</th></tr></thead>
-            <tbody>{% for r in small_pole.records %}<tr>
+            <tbody>{% for r in small_pole.records %}<tr class="smallpole-row" data-flag-code="{{ r.st_code }}" data-flag-date="{{ r.trade_date }}">
                 <td>{{ loop.index }}</td>
                 <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" data-flag-date="{{ r.trade_date }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                 <td>{{ r.name }}</td>
-                <td data-value="{{ r.trade_date }}">{{ r.trade_date }}</td>
+                <td class="flag-date-cell" data-value="{{ r.trade_date }}">{{ r.trade_date }}</td>
                 <td class="metric" data-value="{{ r.pct_chg }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pct_chg) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pct_chg * 4, 100]|min }}%"></span></div></td>
                 <td data-value="{{ r.vol_ratio }}">{{ "%.2f"|format(r.vol_ratio) }}x</td>
                 <td data-value="{{ r.hold_days }}">{{ r.hold_days }} 天</td>
@@ -547,6 +553,7 @@
     <div class="preview-title" id="preview-title">K线预览</div>
     <div class="preview-stage"><canvas id="kline-preview-canvas"></canvas><div class="preview-status" id="preview-status">正在加载…</div></div>
 </div>
+<div class="row-msg" id="row-msg" role="tooltip"></div>
 
 <script>
 function switchTab(event, name) {
@@ -1078,6 +1085,119 @@ canvas.addEventListener('mouseleave', event => {
 });
 msgBox.addEventListener('mouseenter', () => { clearTimeout(msgTimer); msgTimer = null; });
 msgBox.addEventListener('mouseleave', hideFlagMsg);
+// ---- 表格行旗杆日悬停：复用公告缓存，展示当天重要消息 ----
+const rowMsgBox = document.getElementById('row-msg');
+let rowMsgTimer = null;
+let rowMsgKey = '';        // 当前悬停的 code|date
+let rowMsgAnchor = null;   // 当前悬停的单元格
+function hideRowMsg() { clearTimeout(rowMsgTimer); rowMsgTimer = null; rowMsgKey = ''; rowMsgAnchor = null; if (rowMsgBox) rowMsgBox.classList.remove('open'); }
+function positionRowMsg() {
+    if (!rowMsgBox || !rowMsgBox.classList.contains('open') || !rowMsgAnchor) return;
+    const rect = rowMsgAnchor.getBoundingClientRect();
+    const width = rowMsgBox.offsetWidth, height = rowMsgBox.offsetHeight;
+    let leftPos = rect.left, topPos = rect.bottom + 6;
+    if (leftPos + width > window.innerWidth - 8) leftPos = window.innerWidth - width - 8;
+    if (topPos + height > window.innerHeight - 8) topPos = rect.top - height - 6;
+    rowMsgBox.style.left = Math.max(8, leftPos) + 'px';
+    rowMsgBox.style.top = Math.max(8, topPos) + 'px';
+}
+function renderRowMsg(items, day, failedMessage = '') {
+    const head = `<div class="kline-msg-title">旗杆日 ${fmtFlagDate(day)} · 当天重要消息（${items.length}条）</div>`;
+    if (failedMessage) {
+        rowMsgBox.innerHTML = head + `<div class="kline-msg-empty">消息加载失败：${escapeHtml(failedMessage)}</div>`;
+    } else if (!items.length) {
+        rowMsgBox.innerHTML = head + '<div class="kline-msg-empty">当天没有公告</div>';
+    } else {
+        rowMsgBox.innerHTML = head + '<ul>' + items.map(item =>
+            `<li><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a></li>`
+        ).join('') + '</ul>';
+    }
+    rowMsgBox.classList.add('open');
+    positionRowMsg();
+}
+async function showRowMsg(cell) {
+    const row = cell.closest('tr.smallpole-row');
+    if (!row) return;
+    const code = row.dataset.flagCode, day = row.dataset.flagDate;
+    if (!code || !day) return;
+    const key = `${code}|${day}`;
+    clearTimeout(rowMsgTimer); rowMsgTimer = null;
+    rowMsgKey = key; rowMsgAnchor = cell;
+    if (msgCache.has(key)) { renderRowMsg(msgCache.get(key), day); return; }
+    rowMsgBox.innerHTML = `<div class="kline-msg-title">旗杆日 ${fmtFlagDate(day)} · 当天重要消息</div><div class="kline-msg-empty">正在加载…</div>`;
+    rowMsgBox.classList.add('open');
+    positionRowMsg();
+    try {
+        const response = await fetch(`/api/messages/${encodeURIComponent(code)}/${day}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '消息请求失败');
+        msgCache.set(key, data.items);
+        if (rowMsgKey === key) renderRowMsg(data.items, day);
+    } catch (error) {
+        if (rowMsgKey === key) renderRowMsg([], day, error.message);
+    }
+}
+function bindRowMsgHover() {
+    const table = document.getElementById('smallpole-table');
+    if (!table || !rowMsgBox) return;
+    table.addEventListener('mouseover', event => {
+        const row = event.target.closest ? event.target.closest('tr.smallpole-row') : null;
+        // 仅对“旗杆日消息条数>0”（已标粉红）的行启用
+        if (!row || !row.classList.contains('has-flag-msg')) { hideRowMsg(); return; }
+        const cell = event.target.closest('td.flag-date-cell');
+        if (!cell) { if (rowMsgKey) hideRowMsg(); return; }
+        if (rowMsgKey === `${row.dataset.flagCode}|${row.dataset.flagDate}`) return;
+        showRowMsg(cell);
+    });
+    table.addEventListener('mouseout', event => {
+        if (rowMsgBox.contains(event.relatedTarget)) return;
+        const to = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest('td.flag-date-cell') : null;
+        if (to === rowMsgAnchor) return;
+        hideRowMsg();
+    });
+    rowMsgBox.addEventListener('mouseleave', hideRowMsg);
+    window.addEventListener('scroll', hideRowMsg, true);
+}
+// 旗杆日消息条数：并发查询每条小旗杆记录的当天公告，>0 条的整行标粉红底色
+function markSmallPoleMessageRows() {
+    const rows = Array.from(document.querySelectorAll('tr.smallpole-row'));
+    if (!rows.length) return;
+    let cursor = 0;
+    const CONCURRENCY = 6;
+    async function worker() {
+        while (cursor < rows.length) {
+            const row = rows[cursor++];
+            const code = row.dataset.flagCode, day = row.dataset.flagDate;
+            if (!code || !day) continue;
+            const key = `${code}|${day}`;
+            try {
+                let items;
+                if (msgCache.has(key)) {
+                    items = msgCache.get(key);
+                } else {
+                    const response = await fetch(`/api/messages/${encodeURIComponent(code)}/${day}`);
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || '消息请求失败');
+                    items = data.items || [];
+                    msgCache.set(key, items);
+                }
+                if (items.length > 0) row.classList.add('has-flag-msg');
+            } catch (error) {
+                // 单条失败不影响其余记录
+            }
+        }
+    }
+    Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, worker)).then(() => {
+        // 将带旗杆日消息（粉红底色）的行集中排到表格最前面
+        const body = document.querySelector('#smallpole-table tbody');
+        if (!body) return;
+        const ordered = Array.from(body.rows).sort((a, b) =>
+            (b.classList.contains('has-flag-msg') ? 1 : 0) - (a.classList.contains('has-flag-msg') ? 1 : 0));
+        ordered.forEach((row, index) => { row.cells[0].textContent = index + 1; body.appendChild(row); });
+    });
+}
+document.addEventListener('DOMContentLoaded', markSmallPoleMessageRows);
+document.addEventListener('DOMContentLoaded', bindRowMsgHover);
 window.addEventListener('resize', () => { hideFlagMsg(); if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
 </script>
 </body>
