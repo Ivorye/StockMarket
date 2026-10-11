@@ -39,9 +39,12 @@ def _get_stock_basic():
 		pro = ts.pro_api(TUSHARE_TOKEN)
 		_basic_cache = pro.query('stock_basic')
 		#缓存到stocks表
-		_store_to_stocks(_basic_cache)
+		stored = _store_to_stocks(_basic_cache)
 		today_date = datetime.date.today().strftime('%Y%m%d')
-		db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='mysql.connector')
+		if stored:
+			db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='mysql.connector')
+		else:
+			print('股票列表写入stocks表失败，不标记执行状态为Y')
 		return _basic_cache
 	except Exception as e:
 		today_date = datetime.date.today().strftime('%Y%m%d')
@@ -59,19 +62,25 @@ def _get_stock_basic():
 		raise
 
 def _store_to_stocks(df):
+	"""把股票列表写入stocks表；返回是否全部写入成功（失败会打印并返回False）。"""
 	mdb=_connect_sm()
 	mycsr=mdb.cursor()
 	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,name,fullname,list_date) VALUES(%s,%s,%s,%s,%s,%s)"
+	failed=0
 	for i in range(len(df)):
 		try:
 			mycsr.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].fullname,df.iloc[i].list_date))
-		except Exception:
-			pass
+		except Exception as e:
+			failed+=1
+			print("写入stocks失败 %s: %s" % (df.iloc[i].symbol, e))
 		if i%500==499:
 			mdb.commit()
 	mdb.commit()
 	mycsr.close()
 	mdb.close()
+	if failed:
+		print("写入stocks共失败 %d 条" % failed)
+	return failed == 0
 
 # 从 st_daily 查询日线数据，返回与 ts.pro_bar 相同结构的 DataFrame
 #columns: trade_date, open, high, low, close, pct_chg, vol

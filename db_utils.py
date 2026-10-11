@@ -65,7 +65,7 @@ def check_execution_status(task_name, exec_date=None, driver='pymysql'):
         return False
 
 
-def update_execution_status(task_name, status='Y', exec_date=None, driver='pymysql'):
+def update_execution_status(task_name, status='Y', exec_date=None, driver='pymysql', source='system'):
     """
     更新任务执行状态
     
@@ -74,10 +74,13 @@ def update_execution_status(task_name, status='Y', exec_date=None, driver='pymys
         status: 状态值，默认为 'Y'
         exec_date: 执行日期（YYYYMMDD格式），默认为当天
         driver: 数据库驱动类型 ('pymysql' 或 'mysql.connector')
+        source: 更新来源，'manual'=人工，'system'=系统自动（默认）
     """
     try:
         if exec_date is None:
             exec_date = datetime.date.today().strftime('%Y%m%d')
+        if source not in ('manual', 'system'):
+            source = 'system'
         
         if driver == 'pymysql':
             db = connect_pymysql()
@@ -86,10 +89,10 @@ def update_execution_status(task_name, status='Y', exec_date=None, driver='pymys
         
         cursor = db.cursor()
         sql = (
-            "INSERT INTO st_execution_status(task_name,exec_date,status) "
-            "VALUES(%s,%s,%s) ON DUPLICATE KEY UPDATE exec_date=%s,status=%s"
+            "INSERT INTO st_execution_status(task_name,exec_date,source,status) "
+            "VALUES(%s,%s,%s,%s) ON DUPLICATE KEY UPDATE exec_date=%s,source=%s,status=%s"
         )
-        cursor.execute(sql, (task_name, exec_date, status, exec_date, status))
+        cursor.execute(sql, (task_name, exec_date, source, status, exec_date, source, status))
         db.commit()
         cursor.close()
         db.close()
@@ -100,3 +103,31 @@ def update_execution_status(task_name, status='Y', exec_date=None, driver='pymys
 def escape_table_name(name):
     """用反引号包裹表名，防止SQL关键字冲突"""
     return f"`{name.replace('`', '')}`"
+
+
+def ensure_execution_status_table(driver='pymysql'):
+    """确保 st_execution_status 表存在，且 status 前有 source 字段（人工=manual，系统=system）。"""
+    try:
+        db = connect_pymysql() if driver == 'pymysql' else connect_mysql_connector()
+        cursor = db.cursor()
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS st_execution_status ("
+            "  task_name VARCHAR(50) NOT NULL PRIMARY KEY,"
+            "  exec_date VARCHAR(8),"
+            "  source VARCHAR(10) DEFAULT 'system' COMMENT '更新来源：manual=人工，system=系统自动',"
+            "  status VARCHAR(1) DEFAULT 'N'"
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+        )
+        # 兼容旧表：status 前缺 source 字段时补上
+        cursor.execute("SHOW COLUMNS FROM st_execution_status LIKE 'source'")
+        if not cursor.fetchone():
+            cursor.execute(
+                "ALTER TABLE st_execution_status "
+                "ADD COLUMN source VARCHAR(10) DEFAULT 'system' "
+                "COMMENT '更新来源：manual=人工，system=系统自动' AFTER exec_date"
+            )
+        db.commit()
+        cursor.close()
+        db.close()
+    except Exception as e:
+        print(f'确保 st_execution_status 表失败: {e}')

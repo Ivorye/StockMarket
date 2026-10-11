@@ -13,14 +13,17 @@ def connectDB():
 
 #获取最新股票列表（调tushare API），同时缓存到stocks表
 #API失败时检查执行状态，状态为Y则直接从stocks表读取缓存
-def getStockBasic():
+def getStockBasic(source='system'):
 	try:
 		pro = ts.pro_api(TUSHARE_TOKEN)
 		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,fullname,area,industry,list_date')
 		df=pd.DataFrame(data)
-		_store_to_stocks(df)
+		stored = _store_to_stocks(df)
 		today_date = datetime.date.today().strftime('%Y%m%d')
-		db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='pymysql')
+		if stored:
+			db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='pymysql', source=source)
+		else:
+			print('股票列表写入stocks表失败，不标记执行状态为Y')
 		return df
 	except Exception as e:
 		today_date = datetime.date.today().strftime('%Y%m%d')
@@ -31,18 +34,24 @@ def getStockBasic():
 		return getStockBasicFromDB()
 
 def _store_to_stocks(df):
+	"""把股票列表写入stocks表；返回是否全部写入成功（失败会打印并返回False）。"""
 	db=connectDB()
 	cursor=db.cursor()
 	sql="INSERT IGNORE INTO stocks(id,symbol,st_code,name,fullname,list_date) VALUES(%s,%s,%s,%s,%s,%s)"
+	failed=0
 	for i in range(len(df)):
 		try:
 			cursor.execute(sql,(i+1,df.iloc[i].symbol,df.iloc[i].ts_code,df.iloc[i].name,df.iloc[i].fullname,df.iloc[i].list_date))
-		except Exception:
-			pass
+		except Exception as e:
+			failed+=1
+			print("写入stocks失败 %s: %s" % (df.iloc[i].symbol, e))
 		if i%500==499:
 			db.commit()
 	db.commit()
 	db.close()
+	if failed:
+		print("写入stocks共失败 %d 条" % failed)
+	return failed == 0
 
 #从数据库stocks表读取股票列表（避免重复调用stock_basic API）
 #返回与getStockBasic相同结构的DataFrame，若表为空返回None

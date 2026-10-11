@@ -3,6 +3,7 @@ import os
 import csv
 import re
 import datetime
+import threading
 import pymysql
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -21,9 +22,11 @@ templates = Jinja2Templates(env=_env)
 def _init_db():
     import stockPolicy as sp
     import announcements as ann
+    import db_utils
     sp.createSignalTable()
     sp.ensureStocksNameColumn()
     ann.createAnnouncementTable()
+    db_utils.ensure_execution_status_table()
 
 
 # 内存缓存: {cache_key: (timestamp, data)}
@@ -626,3 +629,32 @@ def stock_messages(st_code: str, ann_date: str, refresh: int = 0):
     except Exception as exc:
         return JSONResponse({"error": f"公告查询失败: {exc}"}, status_code=502)
     return {"st_code": st_code, "date": ann_date, "items": items}
+
+
+# 手动更新K线：后台线程执行，接口立即返回，前端轮询 /api/update-kline/status 展示进度
+@app.post("/api/update-kline", tags=["data"])
+def update_kline():
+    """手动触发每日数据更新（网页"更新K线"按钮）。强制执行，不受交易日/假期限制。"""
+    import dailyUpdate as du
+    if du.get_progress().get('running'):
+        return JSONResponse({"error": "更新正在进行中，请稍候"}, status_code=409)
+    threading.Thread(target=_run_daily_update_bg, daemon=True).start()
+    return {"status": "started", "message": "更新已开始"}
+
+
+def _run_daily_update_bg():
+    """后台线程：执行更新并在完成后清空页面缓存。网页按钮触发，来源标记为人工 manual。"""
+    import dailyUpdate as du
+    try:
+        du.run_daily_update(force=True, source='manual')
+    except Exception as exc:
+        print(f'update-kline 后台执行异常: {exc}')
+    finally:
+        _cache.clear()  # 数据已更新，清空内存缓存以便页面读取到最新数据
+
+
+@app.get("/api/update-kline/status", tags=["data"])
+def update_kline_status():
+    """返回K线更新进度，供前端轮询展示进度条。"""
+    import dailyUpdate as du
+    return du.get_progress()

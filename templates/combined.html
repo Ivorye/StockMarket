@@ -16,6 +16,23 @@
         .controls button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .btn-primary { background: #1677ff; color: #fff; }
         .btn-primary:hover { background: #4096ff; }
+        .btn-update-k-line { padding: 8px 20px; margin-left: 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #52c41a; color: #fff; }
+        .btn-update-k-line:hover { background: #73d13d; }
+        .btn-update-k-line:disabled { background: #bfbfbf; cursor: not-allowed; }
+        .update-k-line-status { margin-left: 10px; font-size: 13px; color: #888; }
+        .progress-overlay { display: none; position: fixed; inset: 0; z-index: 1400; background: rgba(0,0,0,.38); align-items: center; justify-content: center; }
+        .progress-overlay.open { display: flex; }
+        .progress-dialog { width: min(420px, 90vw); padding: 20px 22px; border-radius: 10px; background: #fff; box-shadow: 0 12px 40px rgba(0,0,0,.24); }
+        .progress-dialog h3 { margin: 0 0 14px; font-size: 16px; color: #333; }
+        .progress-bar { height: 12px; border-radius: 6px; background: #f0f0f0; overflow: hidden; }
+        .progress-bar-fill { height: 100%; width: 0; border-radius: 6px; background: #1677ff; transition: width .3s ease; }
+        .progress-bar-fill.ok { background: #52c41a; }
+        .progress-bar-fill.err { background: #cf1322; }
+        .progress-info { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: #666; }
+        .progress-message { margin-top: 8px; font-size: 13px; color: #888; min-height: 18px; }
+        .progress-actions { margin-top: 16px; text-align: right; }
+        .progress-actions button { padding: 7px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #1677ff; color: #fff; }
+        .progress-actions button:disabled { background: #bfbfbf; cursor: not-allowed; }
         .stock-query { display: flex; gap: 8px; align-items: center; }
         .stock-query input[type="text"] { width: 150px; }
         .stock-result { font-size: 13px; color: #555; }
@@ -158,8 +175,8 @@
 </head>
 <body>
 <div class="container">
-    <h1>跳空放量涨幅 - 三策略对比</h1>
-    <p class="subtitle">筛选日期: {{ data.today }} vs {{ data.prev_day }} | 最新交易日: {{ data.latest_date }}</p>
+    <h1>股市策略</h1>
+    <p class="subtitle">筛选日期: {{ data.today }} vs {{ data.prev_day }} | 最新交易日: {{ data.latest_date }}<button type="button" class="btn-update-k-line" onclick="updateKLine()">更新K线</button><span class="update-k-line-status" id="update-k-line-status"></span></p>
 
     <div class="controls">
         <form method="get" action="/combined" style="display:flex;gap:12px;align-items:center;">
@@ -554,6 +571,15 @@
     <div class="preview-stage"><canvas id="kline-preview-canvas"></canvas><div class="preview-status" id="preview-status">正在加载…</div></div>
 </div>
 <div class="row-msg" id="row-msg" role="tooltip"></div>
+<div class="progress-overlay" id="progress-overlay" role="dialog" aria-modal="true" aria-labelledby="progress-title">
+    <div class="progress-dialog">
+        <h3 id="progress-title">正在更新K线</h3>
+        <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
+        <div class="progress-info"><span id="progress-percent">0%</span><span id="progress-step">0/6</span></div>
+        <div class="progress-message" id="progress-message">正在启动…</div>
+        <div class="progress-actions"><button type="button" id="progress-close" onclick="closeProgressDialog()" disabled>关闭</button></div>
+    </div>
+</div>
 
 <script>
 function switchTab(event, name) {
@@ -561,6 +587,70 @@ function switchTab(event, name) {
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     event.target.classList.add('active');
     document.getElementById('panel-' + name).classList.add('active');
+}
+let progressTimer = null;
+function openProgressDialog() {
+    const overlay = document.getElementById('progress-overlay');
+    const fill = document.getElementById('progress-fill');
+    fill.style.width = '0%';
+    fill.classList.remove('ok', 'err');
+    document.getElementById('progress-percent').textContent = '0%';
+    document.getElementById('progress-step').textContent = '0/6';
+    document.getElementById('progress-message').textContent = '正在启动…';
+    const closeBtn = document.getElementById('progress-close');
+    closeBtn.disabled = true;
+    closeBtn.textContent = '关闭';
+    overlay.classList.add('open');
+}
+function closeProgressDialog() {
+    document.getElementById('progress-overlay').classList.remove('open');
+}
+function renderProgress(p) {
+    const fill = document.getElementById('progress-fill');
+    const percent = Math.max(0, Math.min(100, Number(p.percent) || 0));
+    fill.style.width = percent + '%';
+    document.getElementById('progress-percent').textContent = percent + '%';
+    document.getElementById('progress-step').textContent = `${p.step || 0}/${p.total || 6}`;
+    document.getElementById('progress-message').textContent = p.message || '';
+    if (p.done) {
+        clearInterval(progressTimer); progressTimer = null;
+        fill.classList.add(p.ok ? 'ok' : 'err');
+        const closeBtn = document.getElementById('progress-close');
+        closeBtn.disabled = false;
+        if (p.ok) {
+            setTimeout(() => location.reload(), 900);
+        }
+    }
+}
+async function pollUpdateProgress() {
+    try {
+        const response = await fetch('/api/update-kline/status');
+        const p = await response.json();
+        renderProgress(p);
+    } catch (error) {
+        // 单次轮询失败忽略，下次继续
+    }
+}
+async function updateKLine() {
+    const btn = document.querySelector('.btn-update-k-line');
+    const status = document.getElementById('update-k-line-status');
+    if (btn && btn.disabled) return;   // 防止重复点击
+    if (btn) btn.disabled = true;
+    if (status) { status.style.color = '#1677ff'; status.textContent = '正在更新…'; }
+    openProgressDialog();
+    try {
+        const response = await fetch('/api/update-kline', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || '更新失败');
+        if (progressTimer) clearInterval(progressTimer);
+        progressTimer = setInterval(pollUpdateProgress, 800);
+        pollUpdateProgress();
+    } catch (error) {
+        if (status) { status.style.color = '#cf1322'; status.textContent = '更新失败：' + error.message; }
+        renderProgress({ percent: 0, step: 0, total: 6, message: '更新失败：' + error.message, done: true, ok: false });
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 let smoothSort = { column: 3, ascending: false };
 function sortSmooth(column) {
