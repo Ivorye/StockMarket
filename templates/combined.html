@@ -33,6 +33,30 @@
         .progress-actions { margin-top: 16px; text-align: right; }
         .progress-actions button { padding: 7px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #1677ff; color: #fff; }
         .progress-actions button:disabled { background: #bfbfbf; cursor: not-allowed; }
+        .reason-trigger { margin-left: 4px; padding: 3px 7px; border: 1px solid #fa8c16; border-radius: 4px; background: #fff7e6; color: #d46b08; cursor: pointer; font-size: 12px; }
+        .reason-trigger:hover { color: #fff; background: #fa8c16; }
+        .reason-overlay { display: none; position: fixed; inset: 0; z-index: 1500; background: rgba(0,0,0,.38); align-items: center; justify-content: center; }
+        .reason-overlay.open { display: flex; }
+        .reason-dialog { width: min(720px, 92vw); max-height: 86vh; overflow-y: auto; padding: 20px 22px; border-radius: 10px; background: #fff; box-shadow: 0 12px 40px rgba(0,0,0,.24); }
+        .reason-dialog h3 { margin: 0 0 4px; font-size: 17px; color: #333; }
+        .reason-dialog .reason-sub { margin-bottom: 14px; color: #888; font-size: 12px; }
+        .reason-section { margin-bottom: 16px; }
+        .reason-section h4 { margin: 0 0 8px; padding-left: 8px; border-left: 3px solid #1677ff; font-size: 14px; color: #333; }
+        .reason-kv { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 18px; font-size: 13px; }
+        .reason-kv .k { color: #888; }
+        .reason-kv .v { color: #333; font-weight: 600; }
+        .reason-kv .pos { color: #cf1322; }
+        .reason-kv .neg { color: #389e0d; }
+        .reason-ann-list { margin: 0; padding-left: 18px; max-height: 260px; overflow-y: auto; font-size: 13px; }
+        .reason-ann-list li { margin: 4px 0; }
+        .reason-ann-list .d { color: #999; margin-right: 6px; font-family: "Consolas", monospace; }
+        .reason-ann-list a { color: #1677ff; text-decoration: none; }
+        .reason-ann-list a:hover { text-decoration: underline; }
+        .reason-empty { color: #999; font-size: 13px; }
+        .reason-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .reason-tags .tag { padding: 2px 8px; border-radius: 4px; background: #f0f5ff; color: #1677ff; font-size: 12px; }
+        .reason-actions { margin-top: 8px; text-align: right; }
+        .reason-actions button { padding: 7px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #1677ff; color: #fff; }
         .stock-query { display: flex; gap: 8px; align-items: center; }
         .stock-query input[type="text"] { width: 150px; }
         .stock-result { font-size: 13px; color: #555; }
@@ -255,7 +279,7 @@
                 <th>起始价</th><th>最新价</th></tr></thead>
             <tbody>{% for r in data.smooth %}<tr>
                 <td>{{ loop.index }}</td>
-                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button><button class="reason-trigger" data-code="{{ r.st_code }}" data-start="{{ data.smooth_start }}" data-end="{{ data.today }}" type="button" onclick="openSmoothReason(this)">上涨理由</button></td>
                 <td>{{ r.name }}</td>
                 <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
@@ -578,6 +602,14 @@
         <div class="progress-info"><span id="progress-percent">0%</span><span id="progress-step">0/6</span></div>
         <div class="progress-message" id="progress-message">正在启动…</div>
         <div class="progress-actions"><button type="button" id="progress-close" onclick="closeProgressDialog()" disabled>关闭</button></div>
+    </div>
+</div>
+<div class="reason-overlay" id="reason-overlay" role="dialog" aria-modal="true" aria-labelledby="reason-title" onclick="if(event.target===this)closeSmoothReason()">
+    <div class="reason-dialog">
+        <h3 id="reason-title">30日平缓上涨 · 理由分析</h3>
+        <div class="reason-sub" id="reason-sub"></div>
+        <div id="reason-body"><div class="reason-empty">正在加载…</div></div>
+        <div class="reason-actions"><button type="button" onclick="closeSmoothReason()">关闭</button></div>
     </div>
 </div>
 
@@ -1289,6 +1321,117 @@ function markSmallPoleMessageRows() {
 document.addEventListener('DOMContentLoaded', markSmallPoleMessageRows);
 document.addEventListener('DOMContentLoaded', bindRowMsgHover);
 window.addEventListener('resize', () => { hideFlagMsg(); if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
+
+// ---- 30日平缓上涨：上涨理由弹窗（行业+经营业绩+技术面+区间公告）----
+const reasonCache = new Map();
+function closeSmoothReason() {
+    const el = document.getElementById('reason-overlay');
+    if (el) el.classList.remove('open');
+}
+function _fmtNum(v, unit, digits = 2) {
+    if (v === null || v === undefined || v === '') return '-';
+    const n = Number(v);
+    if (!isFinite(n)) return '-';
+    return n.toFixed(digits) + (unit || '');
+}
+function _kvRow(label, value, cls) {
+    return `<span class="k">${escapeHtml(label)}</span><span class="v ${cls || ''}">${value}</span>`;
+}
+function _trendClass(v) {
+    if (v === null || v === undefined) return '';
+    return Number(v) >= 0 ? 'pos' : 'neg';
+}
+function renderSmoothReason(data) {
+    const body = document.getElementById('reason-body');
+    const sub = document.getElementById('reason-sub');
+    const name = (data.fundamental && data.fundamental.name) || '';
+    document.getElementById('reason-title').textContent = `30日平缓上涨 · 理由分析 ${name ? '·' + name : ''}`;
+    sub.textContent = `${data.st_code} · 区间 ${data.start_date} ~ ${data.end_date}`;
+
+    const parts = [];
+
+    // 1) 行业 / 板块
+    const f = data.fundamental || {};
+    if (data.fundamental_error) {
+        parts.push(`<div class="reason-section"><h4>行业</h4><div class="reason-empty">${escapeHtml(data.fundamental_error)}</div></div>`);
+    } else {
+        parts.push(`<div class="reason-section"><h4>行业归属</h4>
+            <div class="reason-tags">
+                ${f.industry ? `<span class="tag">行业：${escapeHtml(f.industry)}</span>` : ''}
+                ${f.board ? `<span class="tag">${escapeHtml(f.board)}</span>` : ''}
+            </div></div>`);
+        // 2) 经营业绩
+        parts.push(`<div class="reason-section"><h4>经营业绩与估值</h4>
+            <div class="reason-kv">
+                ${_kvRow('营业收入', f.revenue === null ? '-' : _fmtNum(f.revenue, ' 亿'))}
+                ${_kvRow('净利润', f.net_profit === null ? '-' : _fmtNum(f.net_profit, ' 亿'))}
+                ${_kvRow('净利润同比', _fmtNum(f.profit_yoy, '%'), _trendClass(f.profit_yoy))}
+                ${_kvRow('净资产收益率(ROE)', _fmtNum(f.roe, '%'))}
+                ${_kvRow('毛利率', _fmtNum(f.gross_margin, '%'))}
+                ${_kvRow('净利率', _fmtNum(f.net_margin, '%'))}
+                ${_kvRow('市盈率(动)', _fmtNum(f.pe, ''))}
+                ${_kvRow('市净率', _fmtNum(f.pb, ''))}
+                ${_kvRow('主力净占比', _fmtNum(f.main_net_pct, '%'), _trendClass(f.main_net_pct))}
+            </div></div>`);
+    }
+
+    // 3) 技术面
+    const t = data.technical || {};
+    if (data.technical_error) {
+        parts.push(`<div class="reason-section"><h4>技术面</h4><div class="reason-empty">${escapeHtml(data.technical_error)}</div></div>`);
+    } else if (t.gain_pct !== undefined) {
+        parts.push(`<div class="reason-section"><h4>技术面走势</h4>
+            <div class="reason-kv">
+                ${_kvRow('区间涨幅', _fmtNum(t.gain_pct, '%'), 'pos')}
+                ${_kvRow('R²（趋势吻合度）', _fmtNum(t.r_squared, '', 3))}
+                ${_kvRow('上涨日占比', _fmtNum(t.up_ratio, '%'))}
+                ${_kvRow('最大回撤', _fmtNum(t.max_drawdown_pct, '%'))}
+                ${_kvRow('起始价', _fmtNum(t.start_close, ''))}
+                ${_kvRow('最新价', _fmtNum(t.end_close, ''))}
+            </div></div>`);
+    }
+
+    // 4) 区间公告
+    const anns = data.announcements || [];
+    if (data.announcements_error) {
+        parts.push(`<div class="reason-section"><h4>区间公告</h4><div class="reason-empty">${escapeHtml(data.announcements_error)}</div></div>`);
+    } else if (!anns.length) {
+        parts.push(`<div class="reason-section"><h4>区间公告</h4><div class="reason-empty">区间内没有公告记录</div></div>`);
+    } else {
+        const list = anns.slice(0, 20).map(a =>
+            `<li><span class="d">${fmtFlagDate(a.date)}</span><a href="${escapeHtml(a.url)}" target="_blank" rel="noopener">${escapeHtml(a.title)}</a></li>`
+        ).join('');
+        const more = anns.length > 20 ? `<div class="reason-empty">共 ${anns.length} 条，仅显示最近 20 条</div>` : '';
+        parts.push(`<div class="reason-section"><h4>区间公告（${anns.length} 条）</h4><ul class="reason-ann-list">${list}</ul>${more}</div>`);
+    }
+
+    body.innerHTML = parts.join('');
+}
+async function openSmoothReason(btn) {
+    const code = btn.dataset.code, start = btn.dataset.start, end = btn.dataset.end;
+    const overlay = document.getElementById('reason-overlay');
+    const body = document.getElementById('reason-body');
+    document.getElementById('reason-title').textContent = '30日平缓上涨 · 理由分析';
+    document.getElementById('reason-sub').textContent = `${code} · 区间 ${start} ~ ${end}`;
+    body.innerHTML = '<div class="reason-empty">正在加载…</div>';
+    overlay.classList.add('open');
+    const key = `${code}|${start}|${end}`;
+    try {
+        let data = reasonCache.get(key);
+        if (!data) {
+            const response = await fetch(`/api/smooth-reason/${encodeURIComponent(code)}/${start}/${end}`);
+            data = await response.json();
+            if (!response.ok) throw new Error(data.error || '查询失败');
+            reasonCache.set(key, data);
+        }
+        renderSmoothReason(data);
+    } catch (error) {
+        body.innerHTML = `<div class="reason-empty">加载失败：${escapeHtml(error.message)}</div>`;
+    }
+}
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeSmoothReason();
+});
 </script>
 </body>
 </html>

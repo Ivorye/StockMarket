@@ -171,3 +171,36 @@ def getMessages(st_code, ann_date, refresh=False):
         }
         for r in rows
     ]
+
+
+def getMessagesInRange(st_code, start_date, end_date, refresh=False):
+    """取该股 [start_date, end_date]（YYYYMMDD，含端点）区间内的公告列表。
+
+    缓存缺失时先补拉历史（保证覆盖到 start_date 之前）。
+    """
+    st_code = st_code.upper()
+    if refresh:
+        fetchAnnouncements(st_code, stop_before=start_date)
+    else:
+        earliest, _ = _cached_range(st_code)
+        if earliest is None or start_date < earliest:
+            fetchAnnouncements(st_code, stop_before=start_date)
+    db = _connect()
+    try:
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute(
+            "SELECT ann_date, title, art_code FROM st_announcement "
+            "WHERE st_code=%s AND ann_date>=%s AND ann_date<=%s "
+            "ORDER BY ann_date DESC, art_code DESC",
+            (st_code, start_date, end_date))
+        rows = cursor.fetchall()
+    finally:
+        db.close()
+    return [
+        {
+            'date': r['ann_date'],
+            'title': re.sub(r'^[^:：]{1,20}[:：]', '', r['title']),
+            'url': _detail_url(st_code, r['art_code']),
+        }
+        for r in rows
+    ]

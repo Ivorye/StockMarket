@@ -5,6 +5,7 @@ import re
 import datetime
 import threading
 import pymysql
+import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -658,3 +659,89 @@ def update_kline_status():
     """返回K线更新进度，供前端轮询展示进度条。"""
     import dailyUpdate as du
     return du.get_progress()
+
+
+def _eastmoney_quote_fundamentals(st_code):
+    """从东财 push2 取个股所属行业及经营业绩概要（免 token、无限流）。"""
+    symbol = st_code.split('.')[0]
+    market = 1 if st_code.upper().endswith('.SH') else 0
+    secid = f"{market}.{symbol}"
+    fields = "f57,f58,f127,f128,f105,f183,f162,f167,f173,f184,f185,f186,f187"
+    resp = requests.get(
+        "https://push2.eastmoney.com/api/qt/stock/get",
+        params={"secid": secid, "fields": fields},
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    d = (resp.json() or {}).get("data") or {}
+
+    def num(v, scale=1.0):
+        return None if v in (None, "-") else round(v / scale, 2)
+
+    return {
+        "name": d.get("f58") or "",
+        "industry": d.get("f127") or "",
+        "board": d.get("f128") or "",
+        "net_profit": num(d.get("f105"), 1e8),        # 净利润(亿)
+        "revenue": num(d.get("f183"), 1e8),            # 营业收入(亿)
+        "pe": num(d.get("f162"), 100),                 # 市盈率(动)
+        "pb": num(d.get("f167"), 100),                 # 市净率
+        "roe": num(d.get("f173")),                      # 净资产收益率(%)
+        "main_net_pct": num(d.get("f184")),             # 主力净占比(%)
+        "profit_yoy": num(d.get("f185")),               # 净利润同比(%)
+        "gross_margin": num(d.get("f186")),             # 毛利率(%)
+        "net_margin": num(d.get("f187")),               # 净利率(%)
+    }
+
+
+@app.get("/api/smooth-reason/{st_code}/{start_date}/{end_date}", tags=["data"])
+def smooth_reason(st_code: str, start_date: str, end_date: str):
+    """30日平缓上涨个股的“上涨理由”：行业+经营业绩+技术面+区间公告。"""
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code) \
+            or not re.fullmatch(r"\d{8}", start_date) or not re.fullmatch(r"\d{8}", end_date):
+        return JSONResponse({"error": "参数不正确"}, status_code=400)
+
+    result = {"st_code": st_code, "start_date": start_date, "end_date": end_date}
+
+    # 1) 行业 + 经营业绩（东财）
+    try:
+        result["fundamental"] = _eastmoney_quote_fundamentals(st_code)
+    except Exception as exc:
+        result["fundamental_error"] = f"行业/业绩查询失败: {exc}"
+
+    # 2) 技术面指标（用区间收盘价重算，与列表口径一致）
+    try:
+        import stockPolicy as sp
+        db = _connect_db()
+        cursor = db.cursor()
+        cursor.execute(
+            "SELECT closep FROM st_daily WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s "
+            "ORDER BY trade_date", (st_code, start_date, end_date))
+        closes = [float(r[0]) for r in cursor.fetchall()]
+        db.close()
+        if len(closes) >= 2:
+            m = sp._smooth_uptrend_metrics(closes)
+            if m:
+                result["technical"] = {
+                    "gain_pct": round(m["gain_pct"], 2),
+                    "r_squared": round(m["r_squared"], 3),
+                    "up_ratio": round(m["up_ratio"] * 100, 1),
+                    "max_drawdown_pct": round(m["max_drawdown_pct"], 2),
+                    "start_close": round(closes[0], 2),
+                    "end_close": round(closes[-1], 2),
+                }
+    except Exception as exc:
+        result["technical_error"] = f"技术面计算失败: {exc}"
+
+    # 3) 区间公告
+    try:
+        import announcements as ann
+        items = ann.getMessagesInRange(st_code, start_date, end_date)
+        result["announcements"] = items
+    except Exception as exc:
+        result["announcements_error"] = f"公告查询失败: {exc}"
+        result["announcements"] = []
+
+    return result
