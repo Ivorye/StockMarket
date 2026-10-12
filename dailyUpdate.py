@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _PROGRESS = {
     'running': False,
     'step': 0,
-    'total': 6,
+    'total': 7,
     'percent': 0,
     'message': '',
     'done': False,
@@ -170,7 +170,17 @@ def run_daily_update(force=False, source='system'):
         logger.error(f"放量涨幅筛选失败: {e}")
         _set_progress(message=f'放量涨幅筛选失败: {e}', running=False, done=True, ok=False, error=str(e))
         return False
-    _set_progress(step=6, message='更新完成', running=False, done=True, ok=True)
+    # 步骤7：全市场扫描疑似庄股/高度控盘（低换手 + 低成交额 + 走势稳健）
+    logger.info("[7/7] 全市场扫描疑似庄股...")
+    _set_progress(message='[7/7] 全市场扫描疑似庄股…')
+    try:
+        sp.createSuspectTable()
+        suspects = sp.scanSuspectStocks()
+        logger.info(f"疑似庄股扫描完成，命中 {len(suspects)} 只")
+    except Exception as e:
+        logger.error(f"疑似庄股扫描失败: {e}")
+        # 扫描失败不影响整体更新成功，仅记录
+    _set_progress(step=7, message='更新完成', running=False, done=True, ok=True)
 
     logger.info("========== 每日数据更新完成 ==========")
     return True

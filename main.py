@@ -57,6 +57,58 @@ def _eastmoney_url(st_code: str) -> str:
 templates.env.globals['eastmoney_url'] = _eastmoney_url
 
 
+def _tencent_float_shares(st_codes):
+    """批量取流通股本（腾讯行情，免 token）。
+
+    返回 {st_code: 流通股本(股)}；接口失败或缺失时对应项不在结果中。
+    腾讯字段：涨停价分隔的 ~ 列表，索引 72 为流通股本(股)。
+    """
+    def _prefix(st_code):
+        code, mkt = st_code.split('.')
+        mkt = mkt.upper()
+        if mkt == 'SH':
+            return 'sh' + code
+        if mkt == 'SZ':
+            return 'sz' + code
+        if mkt == 'BJ':
+            return 'bj' + code
+        return code
+
+    result = {}
+    codes = [c for c in st_codes if '.' in c]
+    # 腾讯单次请求代码数量有限，分批
+    for i in range(0, len(codes), 60):
+        batch = codes[i:i + 60]
+        query = ','.join(_prefix(c) for c in batch)
+        try:
+            resp = requests.get(
+                'https://qt.gtimg.cn/q=' + query,
+                headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.qq.com/'},
+                timeout=15)
+            resp.encoding = 'gbk'
+            text = resp.text
+        except Exception:
+            continue
+        for line in text.split(';'):
+            line = line.strip()
+            if '="' not in line:
+                continue
+            key = line.split('=')[0].replace('v_', '')          # 如 sh600519
+            payload = line.split('"', 2)[1]
+            parts = payload.split('~')
+            if len(parts) < 73 or not parts[2]:
+                continue
+            symbol, market = parts[2], key[:2].upper()
+            st_code = f'{symbol}.{market}'
+            try:
+                shares = float(parts[72])
+            except (ValueError, IndexError):
+                continue
+            if shares > 0:
+                result[st_code] = shares
+    return result
+
+
 def _load_backtest_results():
     """載入完整回測彙總；檔案不存在時回傳可渲染的空狀態。"""
     base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -377,14 +429,20 @@ def _run_combined_strategy(date_str=''):
     if len(smooth_dates) == 30:
         placeholders = ','.join(['%s'] * 30)
         cursor.execute(
-            "SELECT d.ts_code,COALESCE(NULLIF(s.name,''),s.fullname,''),d.closep FROM st_daily d "
+            "SELECT d.ts_code,COALESCE(NULLIF(s.name,''),s.fullname,''),d.closep,d.vol,d.amount FROM st_daily d "
             "LEFT JOIN stocks s ON s.st_code=d.ts_code "
             f"WHERE d.trade_date IN ({placeholders}) AND d.symbol NOT LIKE '688%%' "
             "ORDER BY d.ts_code,d.trade_date", tuple(smooth_dates))
         grouped = {}
-        for st_code, sname, closep in cursor.fetchall():
-            item = grouped.setdefault(st_code, {'name': sname, 'closes': []})
+        for st_code, sname, closep, vol, amount in cursor.fetchall():
+            item = grouped.setdefault(st_code, {'name': sname, 'closes': [], 'vols': [], 'amounts': []})
             item['closes'].append(float(closep))
+            item['vols'].append(float(vol or 0))
+            item['amounts'].append(float(amount or 0))
+
+        # 批量取流通股本（腾讯），用于计算换手率
+        float_shares = _tencent_float_shares(list(grouped.keys()))
+
         for st_code, item in grouped.items():
             if len(item['closes']) != 30:
                 continue
@@ -392,6 +450,29 @@ def _run_combined_strategy(date_str=''):
             if (metrics and metrics['gain_pct'] > 30 and metrics['slope'] > 0
                     and metrics['r_squared'] >= 0.8 and metrics['up_ratio'] >= 0.6
                     and metrics['max_drawdown_pct'] <= 10):
+                # 技术面控盘特征
+                vols = item['vols']
+                front = [v for v in vols[:15] if v > 0]
+                back = [v for v in vols[15:] if v > 0]
+                front_avg = sum(front) / len(front) if front else 0
+                back_avg = sum(back) / len(back) if back else 0
+                shrink = front_avg > 0 and back_avg <= front_avg  # 后段未放量（缩量/平量上行）
+                tech_control = (metrics['r_squared'] >= 0.9 and metrics['max_drawdown_pct'] <= 6.5
+                                and metrics['gain_pct'] >= 30 and shrink)
+                # 30日日均成交额（千元 -> 亿元）与日均换手率（%）
+                n = len(item['amounts'])
+                avg_amount_kyuan = sum(item['amounts']) / n if n else 0
+                avg_amount_yi = avg_amount_kyuan / 1e5
+                shares = float_shares.get(st_code)
+                avg_turnover_pct = None
+                if shares and shares > 0:
+                    # 换手率 = 成交量(手)×100 / 流通股本 × 100%
+                    ratios = [v * 100 / shares * 100 for v in vols]
+                    avg_turnover_pct = sum(ratios) / len(ratios)
+                low_amount = avg_amount_yi < 1.0                       # 日均成交额 < 1亿元
+                low_turnover = avg_turnover_pct is not None and avg_turnover_pct <= 1.0
+                # 疑似庄股/高度控盘：技术面控盘 AND 低换手 AND 低成交额
+                suspect = tech_control and low_amount and low_turnover
                 smooth.append({
                     'st_code': st_code, 'name': item['name'],
                     'gain_pct': round(metrics['gain_pct'], 2),
@@ -400,6 +481,9 @@ def _run_combined_strategy(date_str=''):
                     'up_ratio': round(metrics['up_ratio'] * 100, 1),
                     'start_close': round(item['closes'][0], 2),
                     'end_close': round(item['closes'][-1], 2),
+                    'avg_amount_yi': round(avg_amount_yi, 2),
+                    'avg_turnover_pct': round(avg_turnover_pct, 2) if avg_turnover_pct is not None else None,
+                    'suspect_control': suspect,
                 })
         smooth.sort(key=lambda x: x['gain_pct'], reverse=True)
     db.close()
@@ -508,11 +592,30 @@ def _load_small_pole(anchor='', **params):
     return data
 
 
+def _load_suspect_codes():
+    """读取最近一次疑似庄股扫描结果代码集合（带缓存），供所有面板名称列标记。"""
+    cache_key = '__suspect_codes__'
+    now = time.time()
+    if cache_key in _cache:
+        ts, data = _cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            return data
+    codes = set()
+    try:
+        import stockPolicy as sp
+        _, codes = sp.loadSuspectCodes()
+    except Exception as e:
+        print(f'_load_suspect_codes error: {e}')
+    _cache[cache_key] = (now, codes)
+    return codes
+
+
 @app.get("/", response_class=HTMLResponse, tags=["page"])
 @app.get("/combined", response_class=HTMLResponse, tags=["page"])
 async def combined_page(request: Request, date: str = ''):
     """跳空放量涨幅合并策略页面"""
     data = _run_combined_strategy(date)
+    suspect_codes = _load_suspect_codes()
     return templates.TemplateResponse(request, "combined.html", {
         "data": data,
         "backtest": _load_backtest_results(),
@@ -521,6 +624,7 @@ async def combined_page(request: Request, date: str = ''):
         "bull_flag": _load_bull_flag(anchor=date or data['today'], trading_days=10),
         "small_pole": _load_small_pole(anchor=date or data['today']),
         "date": date or data['today'],
+        "suspect_codes": suspect_codes,
     })
 
 
@@ -576,7 +680,7 @@ async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
         date_filter = "AND d.trade_date<=%s" if end_date else ""
         params = (st_code, end_date, days) if end_date else (st_code, days)
         cursor.execute(
-            "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,"
+            "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,d.amount,"
             "COALESCE(NULLIF(s.name,''),s.fullname,'') FROM st_daily d "
             "LEFT JOIN stocks s ON s.st_code=d.ts_code "
             f"WHERE d.ts_code=%s {date_filter} "
@@ -586,10 +690,10 @@ async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
         db.close()
     return {
         "st_code": st_code,
-        "name": rows[0][6] if rows else "",
+        "name": rows[0][7] if rows else "",
         "items": [
             {"date": r[0], "open": r[1], "high": r[2], "low": r[3],
-             "close": r[4], "volume": r[5]}
+             "close": r[4], "volume": r[5], "amount": r[6]}
             for r in rows
         ],
     }

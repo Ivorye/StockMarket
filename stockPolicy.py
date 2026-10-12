@@ -1041,3 +1041,180 @@ def getLiangJiaFangLiang(startDate='', endDate=''):
 	print(time.ctime(),'getLiangJiaFangLiang: %s vs %s, 筛选出%d只, 写入%d条新记录'%(today,prev_day,len(result),inserted))
 	return result
 
+
+#========== 疑似庄股/高度控盘：全市场扫描（低换手 + 低成交额 + 走势稳健）==========
+
+def createSuspectTable():
+	"""建疑似庄股结果表 st_suspect_stock（幂等）。"""
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	mycsr.execute(
+		"CREATE TABLE IF NOT EXISTS st_suspect_stock ("
+		"  trade_date VARCHAR(8) NOT NULL COMMENT '扫描基准日',"
+		"  st_code VARCHAR(12) NOT NULL COMMENT '股票代码',"
+		"  name VARCHAR(50) DEFAULT NULL,"
+		"  gain_pct FLOAT DEFAULT NULL COMMENT '30日涨幅%',"
+		"  r_squared FLOAT DEFAULT NULL COMMENT '30日趋势R2',"
+		"  max_drawdown_pct FLOAT DEFAULT NULL COMMENT '30日最大回撤%',"
+		"  up_ratio FLOAT DEFAULT NULL COMMENT '上涨日占比%',"
+		"  avg_turnover_pct FLOAT DEFAULT NULL COMMENT '30日日均换手率%',"
+		"  avg_amount_yi FLOAT DEFAULT NULL COMMENT '30日日均成交额(亿元)',"
+		"  float_shares DOUBLE DEFAULT NULL COMMENT '流通股本(股)',"
+		"  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+		"  PRIMARY KEY (trade_date, st_code),"
+		"  KEY idx_trade_date (trade_date)"
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+	)
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+
+
+def _tencent_float_shares(st_codes):
+	"""批量取流通股本（腾讯行情 qt.gtimg.cn，字段72）。返回 {st_code: 流通股本(股)}。"""
+	import requests as _requests
+	def _prefix(st_code):
+		code, mkt = st_code.split('.')
+		mkt = mkt.upper()
+		return {'SH': 'sh', 'SZ': 'sz', 'BJ': 'bj'}.get(mkt, '') + code
+	result = {}
+	codes = [c for c in st_codes if '.' in c]
+	for i in range(0, len(codes), 60):
+		batch = codes[i:i + 60]
+		query = ','.join(_prefix(c) for c in batch)
+		try:
+			resp = _requests.get('https://qt.gtimg.cn/q=' + query,
+				headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.qq.com/'},
+				timeout=15)
+			resp.encoding = 'gbk'
+			text = resp.text
+		except Exception:
+			continue
+		for line in text.split(';'):
+			line = line.strip()
+			if '="' not in line:
+				continue
+			key = line.split('=')[0].replace('v_', '')
+			parts = line.split('"', 2)[1].split('~')
+			if len(parts) < 73 or not parts[2]:
+				continue
+			st_code = '%s.%s' % (parts[2], key[:2].upper())
+			try:
+				shares = float(parts[72])
+			except (ValueError, IndexError):
+				continue
+			if shares > 0:
+				result[st_code] = shares
+	return result
+
+
+def scanSuspectStocks(trading_days=30, max_turnover_pct=1.0, max_amount_yi=1.0,
+		min_r_squared=0.5, max_drawdown_pct=15, min_gain_pct=0, endDate=''):
+	"""全市场扫描疑似庄股/高度控盘，写入 st_suspect_stock，返回结果列表。
+
+	判定（同时满足）：
+	  - 走势稳健：30日 R2>=min_r_squared 且 最大回撤<=max_drawdown_pct 且 涨幅>=min_gain_pct
+	  - 低换手：30日日均换手率 <= max_turnover_pct
+	  - 低成交额：30日日均成交额 <= max_amount_yi 亿元
+	"""
+	need = trading_days
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	if endDate:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily WHERE trade_date<=%s ORDER BY trade_date DESC LIMIT %s", (endDate, need))
+	else:
+		mycsr.execute("SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT %s", (need,))
+	dates = [row[0] for row in mycsr.fetchall()]
+	if len(dates) < need:
+		mycsr.close(); mdb.close()
+		print('st_daily 交易日不足 %d 天' % need)
+		return []
+	dates.reverse()
+	trade_date = dates[-1]
+	placeholders = ','.join(['%s'] * len(dates))
+	mycsr.execute("SELECT ts_code,closep,vol,amount FROM st_daily "
+		f"WHERE trade_date IN ({placeholders}) ORDER BY ts_code,trade_date", tuple(dates))
+	grouped = {}
+	for ts_code, closep, vol, amount in mycsr.fetchall():
+		g = grouped.setdefault(ts_code, {'closes': [], 'vols': [], 'amounts': []})
+		g['closes'].append(float(closep or 0))
+		g['vols'].append(float(vol or 0))
+		g['amounts'].append(float(amount or 0))
+	mycsr.close()
+	mdb.close()
+
+	df = _get_stock_basic()
+	ts_to_idx = {df.ts_code[i]: i for i in range(len(df))}
+	float_shares = _tencent_float_shares(list(grouped.keys()))
+
+	result = []
+	for ts_code, item in grouped.items():
+		n = len(item['closes'])
+		if n != need:
+			continue
+		idx = ts_to_idx.get(ts_code)
+		if idx is None or _should_skip(df, idx):
+			continue
+		metrics = _smooth_uptrend_metrics(item['closes'])
+		if not metrics:
+			continue
+		if not (metrics['r_squared'] >= min_r_squared
+				and metrics['max_drawdown_pct'] <= max_drawdown_pct
+				and metrics['gain_pct'] >= min_gain_pct):
+			continue
+		shares = float_shares.get(ts_code)
+		if not shares:
+			continue
+		vols = item['vols']
+		avg_turnover = sum(v * 100 / shares * 100 for v in vols) / n
+		if avg_turnover > max_turnover_pct:
+			continue
+		avg_amount_yi = (sum(item['amounts']) / n) / 1e5
+		if avg_amount_yi > max_amount_yi:
+			continue
+		name = df.name[idx]
+		result.append({
+			'st_code': ts_code,
+			'name': '' if name != name else str(name),
+			'gain_pct': round(metrics['gain_pct'], 2),
+			'r_squared': round(metrics['r_squared'], 4),
+			'max_drawdown_pct': round(metrics['max_drawdown_pct'], 2),
+			'up_ratio': round(metrics['up_ratio'] * 100, 2),
+			'avg_turnover_pct': round(avg_turnover, 3),
+			'avg_amount_yi': round(avg_amount_yi, 3),
+			'float_shares': shares,
+		})
+	result.sort(key=lambda x: x['avg_turnover_pct'])
+
+	# 写入库（先清当日旧结果，保证与本次扫描一致）
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	mycsr.execute("DELETE FROM st_suspect_stock WHERE trade_date=%s", (trade_date,))
+	sql = ("INSERT INTO st_suspect_stock(trade_date,st_code,name,gain_pct,r_squared,"
+		   "max_drawdown_pct,up_ratio,avg_turnover_pct,avg_amount_yi,float_shares) "
+		   "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)")
+	for r in result:
+		mycsr.execute(sql, (trade_date, r['st_code'], r['name'], r['gain_pct'], r['r_squared'],
+			r['max_drawdown_pct'], r['up_ratio'], r['avg_turnover_pct'], r['avg_amount_yi'], r['float_shares']))
+	mdb.commit()
+	mycsr.close()
+	mdb.close()
+	print(time.ctime(), 'scanSuspectStocks: 基准日%s，命中%d只' % (trade_date, len(result)))
+	return result
+
+
+def loadSuspectCodes():
+	"""读取最近一次扫描的疑似庄股代码集合，供网页标记。返回 (trade_date, set(codes))。"""
+	mdb = _connect_sm()
+	mycsr = mdb.cursor()
+	mycsr.execute("SELECT MAX(trade_date) FROM st_suspect_stock")
+	row = mycsr.fetchone()
+	trade_date = row[0] if row else None
+	codes = set()
+	if trade_date:
+		mycsr.execute("SELECT st_code FROM st_suspect_stock WHERE trade_date=%s", (trade_date,))
+		codes = {r[0] for r in mycsr.fetchall()}
+	mycsr.close()
+	mdb.close()
+	return trade_date, codes
+

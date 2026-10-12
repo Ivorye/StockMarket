@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% macro name_cell(code, name) %}<td{% if code in suspect_codes %} class="suspect-control" title="疑似庄股/高度控盘"{% endif %}>{{ name }}</td>{% endmacro %}
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -90,6 +91,7 @@
         tr.has-flag-msg:hover { background: #ffe2ef; }
         tr.has-flag-msg td { background: transparent; }
         .code { font-family: "Cascadia Code", "Consolas", monospace; }
+        .suspect-control { background: #d9f7be; color: #135200; font-weight: 600; cursor: help; }
         .code a { color: #1677ff; text-decoration: none; }
         .code a:hover { text-decoration: underline; }
         .kline-trigger { margin-left: 8px; padding: 3px 7px; border: 1px solid #d9d9d9; border-radius: 4px; background: #fff; color: #555; cursor: pointer; font-size: 12px; }
@@ -125,6 +127,7 @@
         .chart-close { min-width: 44px; min-height: 44px; border: 0; background: transparent; color: #666; cursor: pointer; font-size: 24px; }
         .chart-stage { position: relative; height: 480px; border: 1px solid #eee; background: #fff; }
         #kline-canvas { width: 100%; height: 100%; display: block; }
+        #kline-crosshair { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; z-index: 4; }
         .chart-status { position: absolute; inset: 0; display: grid; place-items: center; color: #888; background: rgba(255,255,255,.92); }
         .kline-msg { position: absolute; z-index: 6; max-width: 330px; min-width: 190px; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.98); box-shadow: 0 6px 20px rgba(0,0,0,.16); color: #333; font-size: 12px; line-height: 1.5; }
         .kline-msg[hidden] { display: none; }
@@ -134,6 +137,13 @@
         .kline-msg a { color: #1677ff; text-decoration: none; }
         .kline-msg a:hover { text-decoration: underline; }
         .kline-msg-empty { color: #999; }
+        .kline-hover { position: absolute; z-index: 5; pointer-events: none; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.97); box-shadow: 0 4px 14px rgba(0,0,0,.14); color: #333; font-size: 12px; line-height: 1.6; white-space: nowrap; font-family: "Cascadia Code", "Consolas", monospace; }
+        .kline-hover[hidden] { display: none; }
+        .kline-hover .lh-date { color: #888; margin-bottom: 2px; }
+        .kline-hover .lh-row { display: flex; justify-content: space-between; gap: 12px; }
+        .kline-hover .lh-k { color: #999; }
+        .kline-hover .lh-up { color: #cf1322; }
+        .kline-hover .lh-down { color: #389e0d; }
         .row-msg { display: none; position: fixed; z-index: 1200; max-width: 330px; min-width: 190px; padding: 8px 10px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.98); box-shadow: 0 6px 20px rgba(0,0,0,.16); color: #333; font-size: 12px; line-height: 1.5; }
         .row-msg.open { display: block; }
         .has-flag-msg td[data-value] { cursor: pointer; }
@@ -276,15 +286,19 @@
                 <th class="sortable" tabindex="0" onclick="sortSmooth(4)" onkeydown="if(event.key==='Enter')sortSmooth(4)">最大回撤 ↕</th>
                 <th class="sortable" tabindex="0" onclick="sortSmooth(5)" onkeydown="if(event.key==='Enter')sortSmooth(5)">R² ↕<span class="help-wrap" onclick="event.stopPropagation()"><button class="help-icon" type="button" aria-describedby="r2-help" aria-label="查看 R 平方说明">?</button><span class="help-tooltip" id="r2-help" role="tooltip"><strong>R²（决定系数）</strong><br>衡量30日收盘价与直线上升趋势的吻合程度，范围为0～1。越接近1，走势越平稳一致；越接近0，波动越杂乱。<br><strong>当前判断标准：</strong>R²≥0.8 才会入选；它不代表未来一定上涨。</span></span></th>
                 <th class="sortable" tabindex="0" onclick="sortSmooth(6)" onkeydown="if(event.key==='Enter')sortSmooth(6)">上涨日占比 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(7)" onkeydown="if(event.key==='Enter')sortSmooth(7)">日均成交额 ↕</th>
+                <th class="sortable" tabindex="0" onclick="sortSmooth(8)" onkeydown="if(event.key==='Enter')sortSmooth(8)">日均换手率 ↕</th>
                 <th>起始价</th><th>最新价</th></tr></thead>
             <tbody>{% for r in data.smooth %}<tr>
                 <td>{{ loop.index }}</td>
                 <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button><button class="reason-trigger" data-code="{{ r.st_code }}" data-start="{{ data.smooth_start }}" data-end="{{ data.today }}" type="button" onclick="openSmoothReason(this)">上涨理由</button></td>
-                <td>{{ r.name }}</td>
+                {{ name_cell(r.st_code, r.name) }}
                 <td class="metric" data-value="{{ r.gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.gain_pct, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.max_drawdown_pct }}"><div class="metric-value">{{ "%.2f"|format(r.max_drawdown_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ r.max_drawdown_pct * 10 }}%"></span></div></td>
                 <td data-value="{{ r.r_squared }}">{{ "%.3f"|format(r.r_squared) }}</td>
                 <td data-value="{{ r.up_ratio }}">{{ "%.1f"|format(r.up_ratio) }}%</td>
+                <td data-value="{{ r.avg_amount_yi }}">{{ "%.2f"|format(r.avg_amount_yi) }} 亿</td>
+                <td data-value="{{ r.avg_turnover_pct if r.avg_turnover_pct is not none else -1 }}">{% if r.avg_turnover_pct is not none %}{{ "%.2f"|format(r.avg_turnover_pct) }}%{% else %}-{% endif %}</td>
                 <td>{{ "%.2f"|format(r.start_close) }}</td><td>{{ "%.2f"|format(r.end_close) }}</td>
             </tr>{% endfor %}</tbody>
         </table></div>
@@ -307,7 +321,7 @@
             <tbody>{% for r in bull_flag.records %}<tr>
                 <td>{{ loop.index }}</td>
                 <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
-                <td>{{ r.name }}</td>
+                {{ name_cell(r.st_code, r.name) }}
                 <td class="metric" data-value="{{ r.pole_gain_pct }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pole_gain_pct) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pole_gain_pct * 2, 100]|min }}%"></span></div></td>
                 <td class="metric" data-value="{{ r.retrace_pct }}"><div class="metric-value">{{ "%.2f"|format(r.retrace_pct) }}%</div><div class="metric-track"><span class="metric-fill drawdown" style="width:{{ [r.retrace_pct * 2, 100]|min }}%"></span></div></td>
                 <td data-value="{{ r.flag_range_pct }}">{{ "%.2f"|format(r.flag_range_pct) }}%</td>
@@ -340,7 +354,7 @@
             <tbody>{% for r in small_pole.records %}<tr class="smallpole-row" data-flag-code="{{ r.st_code }}" data-flag-date="{{ r.trade_date }}">
                 <td>{{ loop.index }}</td>
                 <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" rel="noopener">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" data-flag-date="{{ r.trade_date }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
-                <td>{{ r.name }}</td>
+                {{ name_cell(r.st_code, r.name) }}
                 <td class="flag-date-cell" data-value="{{ r.trade_date }}">{{ r.trade_date }}</td>
                 <td class="metric" data-value="{{ r.pct_chg }}"><div class="metric-value"><strong>{{ "%.2f"|format(r.pct_chg) }}%</strong></div><div class="metric-track"><span class="metric-fill" style="width:{{ [r.pct_chg * 4, 100]|min }}%"></span></div></td>
                 <td data-value="{{ r.vol_ratio }}">{{ "%.2f"|format(r.vol_ratio) }}x</td>
@@ -383,7 +397,7 @@
                 <tr>
                     <td>{{ loop.index }}</td>
                     <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
-                    <td>{{ r.name }}</td>
+                    {{ name_cell(r.st_code, r.name) }}
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -446,7 +460,7 @@
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
                     <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
-                    <td>{{ r.name }}</td>
+                    {{ name_cell(r.st_code, r.name) }}
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -508,7 +522,7 @@
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
                     <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
-                    <td>{{ r.name }}</td>
+                    {{ name_cell(r.st_code, r.name) }}
                     <td>
                         {% if r.pct_chg >= 10 %}
                             <span class="tag tag-red">{{ "%.2f" | format(r.pct_chg) }}%</span>
@@ -587,7 +601,7 @@
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" tabindex="-1" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
         <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>–</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>–</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
-            <div class="chart-stage"><canvas id="kline-canvas"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div><div class="kline-msg" id="kline-msg" role="tooltip" hidden></div></div>
+            <div class="chart-stage"><canvas id="kline-canvas"></canvas><canvas id="kline-crosshair"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div><div class="kline-msg" id="kline-msg" role="tooltip" hidden></div><div class="kline-hover" id="kline-hover" hidden></div></div>
     </section>
 </div>
 <div class="kline-preview" id="kline-preview" aria-hidden="true">
@@ -753,6 +767,9 @@ let msgLoadingKey = '';        // 正在请求中的 code|date，防重复发请
 let msgShownKey = '';          // 已渲染的 code|date，防 mousemove 高频重建 DOM
 const msgCache = new Map();
 const msgBox = document.getElementById('kline-msg');
+const hoverBox = document.getElementById('kline-hover');
+const crossCanvas = document.getElementById('kline-crosshair');
+const crossCtx = crossCanvas.getContext('2d');
 // 记录来源列表（按当前排序后的 DOM 顺序），供 ▲▼ / PgUp/PgDn 切换上下只股票
 function setKlineNav(triggerEl, code) {
     const table = triggerEl && triggerEl.closest ? triggerEl.closest('table') : null;
@@ -1099,6 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
     input.addEventListener('blur', () => setTimeout(closeSuggest, 180));
 });
 function drawKline(items, targetCanvas = canvas) {
+    hideKlineHover();
     const dpr = window.devicePixelRatio || 1, rect = targetCanvas.getBoundingClientRect();
     targetCanvas.width = rect.width * dpr; targetCanvas.height = rect.height * dpr;
     const ctx = targetCanvas.getContext('2d'); ctx.scale(dpr, dpr);
@@ -1110,10 +1128,11 @@ function drawKline(items, targetCanvas = canvas) {
     for(let i=0;i<=4;i++){const yy=top+(priceBottom-top)*i/4;ctx.beginPath();ctx.moveTo(left,yy);ctx.lineTo(w-right,yy);ctx.stroke();ctx.fillText((maxP-range*i/4).toFixed(2),4,yy+4);}
     items.forEach((d,i)=>{const x=left+step*(i+.5),up=d.close>=d.open,color=up?'#cf1322':'#389e0d';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(d.high));ctx.lineTo(x,y(d.low));ctx.stroke();const yo=y(Math.max(d.open,d.close)),bh=Math.max(1,Math.abs(y(d.open)-y(d.close)));ctx.fillRect(x-body/2,yo,body,bh);const vh=(d.volume/maxV)*(bottom-volTop);ctx.globalAlpha=.48;ctx.fillRect(x-body/2,bottom-vh,body,vh);ctx.globalAlpha=1;});
     ctx.fillStyle='#888'; const labels=[0,Math.floor((items.length-1)/2),items.length-1]; labels.forEach(i=>{const x=left+step*(i+.5);ctx.fillText(items[i].date.slice(4,6)+'-'+items[i].date.slice(6,8),x-15,h-8);});
-    ctx.fillText('成交量',4,volTop+10);
+    ctx.fillText('成交量(万手)',4,volTop+10);
     // 旗杆日：高亮该日蜡烛，并在最高价上方画小旗图标（仅主画布，预览不画）
     if (targetCanvas !== canvas) return;
-    chartGeom = {left, step, top, priceBottom, count: items.length};
+    chartGeom = {left, step, top, priceBottom, count: items.length,
+                 maxP, minP, range, volTop, bottom, maxV};
     flagIconHit = null;
     if (!currentFlagDate) return;
     const fi = items.findIndex(d => d.date === currentFlagDate);
@@ -1201,6 +1220,117 @@ canvas.addEventListener('mousemove', event => {
     const onIcon = Math.hypot(mx - flagIconHit.x, my - flagIconHit.y) <= flagIconHit.r + 4;
     if (onFlagDay || onIcon) showFlagMsg(); else hideFlagMsgSoon();
 });
+// ---- K线悬停：在鼠标旁展示该日的开高低收与成交额 ----
+function fmtAmount(qian_yuan) {
+    // amount 单位为千元；转成“亿元/万元”自适应
+    if (qian_yuan === null || qian_yuan === undefined || !isFinite(qian_yuan) || qian_yuan <= 0) return '-';
+    const yi = qian_yuan / 1e5;     // 千元 -> 亿元 (1亿 = 1e5 千元)
+    if (yi >= 1) return yi.toFixed(2) + ' 亿元';
+    const wan = qian_yuan / 10;      // 千元 -> 万元 (1万 = 10 千元)
+    return wan.toFixed(2) + ' 万元';
+}
+function hideKlineHover() { if (hoverBox) hoverBox.hidden = true; hideCrosshair(); }
+function clearCrosshair() {
+    if (!crossCanvas) return;
+    crossCtx.clearRect(0, 0, crossCanvas.width, crossCanvas.height);
+}
+function drawCrosshair(index, mx, my) {
+    if (!crossCanvas || !chartGeom) return;
+    const dpr = window.devicePixelRatio || 1;
+    const stage = crossCanvas.parentElement;
+    const w = stage.clientWidth, h = stage.clientHeight;
+    if (crossCanvas.width !== Math.round(w * dpr) || crossCanvas.height !== Math.round(h * dpr)) {
+        crossCanvas.width = Math.round(w * dpr);
+        crossCanvas.height = Math.round(h * dpr);
+    }
+    const ctx = crossCtx;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const g = chartGeom;
+    // 吸附到该 K 线的中心 x
+    const cx = g.left + g.step * (index + 0.5);
+    const cy = Math.max(g.top, Math.min(my, g.bottom));
+    ctx.save();
+    ctx.strokeStyle = 'rgba(90,90,90,.65)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    // 垂直线
+    ctx.beginPath();
+    ctx.moveTo(cx, g.top);
+    ctx.lineTo(cx, g.bottom);
+    ctx.stroke();
+    // 水平线（仅价格区范围内，跟随鼠标 y）
+    if (my >= g.top && my <= g.priceBottom + 20) {
+        ctx.beginPath();
+        ctx.moveTo(g.left, my);
+        ctx.lineTo(w - 18, my);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // 该日收盘价参考线（价格区）
+    const px = g.left + g.step * (index + 0.5);
+    ctx.restore();
+    // x 轴日期高亮标签
+    const item = currentChartItems[index];
+    if (item) {
+        const label = item.date.slice(4, 6) + '-' + item.date.slice(6, 8);
+        ctx.font = '11px Cascadia Code, Consolas, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(51,51,51,.92)';
+        const tw = ctx.measureText(label).width + 12;
+        const ty = h - 22;
+        ctx.fillRect(cx - tw / 2, ty, tw, 16);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, cx, ty + 12);
+        ctx.textAlign = 'left';
+    }
+}
+function hideCrosshair() { clearCrosshair(); }
+function showKlineHover(index, clientX, clientY) {
+    if (!hoverBox || !chartGeom) return;
+    const items = currentChartItems;
+    if (index < 0 || index >= items.length) { hideKlineHover(); return; }
+    const d = items[index];
+    const prev = index > 0 ? items[index - 1] : null;
+    const chg = prev ? (d.close - prev.close) : (d.close - d.open);
+    const chgPct = prev && prev.close ? (chg / prev.close * 100) : 0;
+    const cls = chg >= 0 ? 'lh-up' : 'lh-down';
+    // 成交额：优先用 amount（千元）；缺失时用 volume(手) × 均价 估算
+    let amount = d.amount;
+    if (amount === null || amount === undefined || !isFinite(amount) || amount <= 0) {
+        const avg = (d.open + d.high + d.low + d.close) / 4;
+        amount = (d.volume || 0) * 100 * avg / 1000;  // 手×100股×价 = 元 -> 千元
+    }
+    const dt = d.date;
+    hoverBox.innerHTML =
+        `<div class="lh-date">${dt.slice(0,4)}-${dt.slice(4,6)}-${dt.slice(6,8)}</div>` +
+        `<div class="lh-row"><span class="lh-k">开</span><span>${Number(d.open).toFixed(2)}</span></div>` +
+        `<div class="lh-row"><span class="lh-k">高</span><span class="lh-up">${Number(d.high).toFixed(2)}</span></div>` +
+        `<div class="lh-row"><span class="lh-k">低</span><span class="lh-down">${Number(d.low).toFixed(2)}</span></div>` +
+        `<div class="lh-row"><span class="lh-k">收</span><span class="${cls}">${Number(d.close).toFixed(2)}</span></div>` +
+        `<div class="lh-row"><span class="lh-k">涨跌</span><span class="${cls}">${chg >= 0 ? '+' : ''}${chgPct.toFixed(2)}%</span></div>` +
+        `<div class="lh-row"><span class="lh-k">成交额</span><span>${fmtAmount(amount)}</span></div>`;
+    hoverBox.hidden = false;
+    const stage = hoverBox.parentElement;
+    const stageW = stage.clientWidth, stageH = stage.clientHeight;
+    const rect = canvas.getBoundingClientRect();
+    const px = clientX - rect.left, py = clientY - rect.top;
+    let leftPos = px + 16, topPos = py + 12;
+    if (leftPos + hoverBox.offsetWidth > stageW - 6) leftPos = px - hoverBox.offsetWidth - 16;
+    if (topPos + hoverBox.offsetHeight > stageH - 6) topPos = py - hoverBox.offsetHeight - 12;
+    hoverBox.style.left = Math.max(6, leftPos) + 'px';
+    hoverBox.style.top = Math.max(6, topPos) + 'px';
+}
+canvas.addEventListener('mousemove', event => {
+    if (!chartGeom || !currentChartItems.length) { hideKlineHover(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+    if (mx < chartGeom.left || mx > chartGeom.left + chartGeom.step * chartGeom.count) { hideKlineHover(); return; }
+    const idx = Math.floor((mx - chartGeom.left) / chartGeom.step);
+    showKlineHover(idx, event.clientX, event.clientY);
+    drawCrosshair(idx, mx, my);
+});
+canvas.addEventListener('mouseleave', hideKlineHover);
 canvas.addEventListener('mouseleave', event => {
     if (event.relatedTarget && msgBox.contains(event.relatedTarget)) return;
     hideFlagMsgSoon();
