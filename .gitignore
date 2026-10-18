@@ -3,3 +3,4 @@ logs/strategies.log
 server_err.log
 server_out.log
 output/signals_*.csv
+output/float_shares_cache.json

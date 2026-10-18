@@ -2,6 +2,7 @@ import time
 import os
 import csv
 import re
+import json
 import datetime
 import threading
 import pymysql
@@ -34,6 +35,19 @@ def _init_db():
 _cache = {}
 _CACHE_TTL = 1800  # 30分钟
 _DB_TIMEOUT_SECONDS = 15
+# 预热与首次请求可能同时触发同一份计算，用锁保证同名缓存只算一次
+_cache_locks = {}
+_cache_locks_guard = threading.Lock()
+
+
+def _cache_lock(key):
+    """返回某缓存键对应的互斥锁，避免并发重复计算耗时任务。"""
+    with _cache_locks_guard:
+        lock = _cache_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _cache_locks[key] = lock
+        return lock
 
 
 def _connect_db(timeout_seconds=_DB_TIMEOUT_SECONDS):
@@ -57,11 +71,50 @@ def _eastmoney_url(st_code: str) -> str:
 templates.env.globals['eastmoney_url'] = _eastmoney_url
 
 
+def _float_shares_cache_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'output', 'float_shares_cache.json')
+
+
+def _load_float_shares_cache():
+    """读取本地流通股本缓存，返回 (date_str, {st_code: shares})。
+
+    缓存按天失效：流通股本变动极少，每天首次访问时刷新一次即可。
+    """
+    try:
+        path = _float_shares_cache_path()
+        if not os.path.exists(path):
+            return '', {}
+        with open(path, encoding='utf-8') as handle:
+            payload = json.load(handle)
+        return str(payload.get('date') or ''), (payload.get('shares') or {})
+    except Exception as exc:
+        print(f'_load_float_shares_cache error: {exc}')
+        return '', {}
+
+
+def _save_float_shares_cache(date_str, shares):
+    """把流通股本写入本地缓存（先写临时文件再替换，避免写一半损坏）。"""
+    try:
+        path = _float_shares_cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as handle:
+            json.dump({'date': date_str, 'shares': shares}, handle)
+        os.replace(tmp, path)
+    except Exception as exc:
+        print(f'_save_float_shares_cache error: {exc}')
+
+
 def _tencent_float_shares(st_codes):
-    """批量取流通股本（腾讯行情，免 token）。
+    """批量取流通股本（腾讯行情，免 token），带按天本地缓存。
 
     返回 {st_code: 流通股本(股)}；接口失败或缺失时对应项不在结果中。
     腾讯字段：涨停价分隔的 ~ 列表，索引 72 为流通股本(股)。
+
+    性能说明：全市场约 5000 只股票需 80 多次请求，耗时可达 60 秒，
+    因此结果按天缓存在 output/float_shares_cache.json；当天缓存命中时
+    只补拉缺失的代码，避免每次刷新页面都重新请求整个市场。
     """
     def _prefix(st_code):
         code, mkt = st_code.split('.')
@@ -74,11 +127,22 @@ def _tencent_float_shares(st_codes):
             return 'bj' + code
         return code
 
-    result = {}
+    today = time.strftime('%Y%m%d')
     codes = [c for c in st_codes if '.' in c]
+
+    cache_date, cached = _load_float_shares_cache()
+    if cache_date == today:
+        missing = [c for c in codes if c not in cached]
+        if not missing:
+            return {c: cached[c] for c in codes}
+    else:
+        cached = {}
+        missing = codes
+
+    result = {}
     # 腾讯单次请求代码数量有限，分批
-    for i in range(0, len(codes), 60):
-        batch = codes[i:i + 60]
+    for i in range(0, len(missing), 60):
+        batch = missing[i:i + 60]
         query = ','.join(_prefix(c) for c in batch)
         try:
             resp = requests.get(
@@ -106,7 +170,17 @@ def _tencent_float_shares(st_codes):
                 continue
             if shares > 0:
                 result[st_code] = shares
-    return result
+
+    # 合并写回缓存：仅当本次确实取到数据时落盘，避免网络故障把缓存清空
+    if result:
+        merged = dict(cached)
+        merged.update(result)
+        _save_float_shares_cache(today, merged)
+
+    merged_all = dict(cached)
+    merged_all.update(result)
+    return {c: merged_all[c] for c in codes if c in merged_all}
+
 
 
 def _load_backtest_results():
@@ -348,6 +422,18 @@ def _run_combined_strategy(date_str=''):
         if now - ts < _CACHE_TTL:
             return data
 
+    # 串行化同一键的计算：后台预热与首次页面请求同时到来时只算一次
+    with _cache_lock('combined|' + cache_key):
+        now = time.time()
+        if cache_key in _cache:
+            ts, data = _cache[cache_key]
+            if now - ts < _CACHE_TTL:
+                return data
+        return _compute_combined_strategy(date_str, cache_key, now)
+
+
+def _compute_combined_strategy(date_str, cache_key, now):
+    """真正的策略计算（无缓存），由 _run_combined_strategy 在锁内调用。"""
     db = _connect_db()
     cursor = db.cursor()
     cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (_DB_TIMEOUT_SECONDS * 1000,))
@@ -532,6 +618,12 @@ def _load_bull_flag(anchor='', trading_days=10):
         if now - ts < _CACHE_TTL:
             return data
 
+    with _cache_lock(cache_key):
+        return _compute_bull_flag(cache_key, anchor, trading_days, now)
+
+
+def _compute_bull_flag(cache_key, anchor, trading_days, now):
+    """上升旗形扫描（无缓存），由 _load_bull_flag 在锁内调用。"""
     start_date, signal_date, items = '', '', []
     try:
         dates = _anchor_dates(anchor, trading_days)
@@ -568,6 +660,13 @@ def _load_small_pole(anchor='', **params):
         if now - ts < _CACHE_TTL:
             return data
 
+    with _cache_lock(cache_key):
+        return _compute_small_pole(cache_key, anchor, params, now)
+
+
+def _compute_small_pole(cache_key, anchor, params, now):
+    """小旗杆扫描（无缓存），由 _load_small_pole 在锁内调用。"""
+    need = params.get('lookback', 10) + params.get('prev_vol_days', 5)
     start_date, signal_date, records = '', '', []
     try:
         dates = _anchor_dates(anchor, need)
@@ -610,13 +709,50 @@ def _load_suspect_codes():
     return codes
 
 
+def _warm_cache():
+    """后台预热首屏所需的缓存（策略、疑似庄股、上升旗形、小旗杆、回测）。
+
+    在 startup 里以守护线程启动：服务可以立即接受请求，预热期间页面仍能
+    正常访问（只是会等对应数据算完），计算完成后后续访问全部命中缓存。
+    """
+    started = time.time()
+    try:
+        today = _run_combined_strategy('')['today']
+    except Exception as e:
+        print(f'[warmup] combined error: {e}')
+        return
+    print(f'[warmup] combined ready in {time.time() - started:.1f}s')
+
+    steps = [
+        ('suspect_codes', _load_suspect_codes),
+        ('backtest', _load_backtest_results),
+        ('bull_flag', lambda: _load_bull_flag(anchor=today, trading_days=10)),
+        ('small_pole', lambda: _load_small_pole(anchor=today)),
+    ]
+    for name, fn in steps:
+        t = time.time()
+        try:
+            fn()
+            print(f'[warmup] {name} ready in {time.time() - t:.1f}s')
+        except Exception as e:
+            print(f'[warmup] {name} error: {e}')
+    print(f'[warmup] all done in {time.time() - started:.1f}s')
+
+
+@app.on_event("startup")
+def _start_cache_warmup():
+    """服务启动后立即在后台预热，避免每天第一次打开页面等待全部扫描。"""
+    thread = threading.Thread(target=_warm_cache, name='cache-warmup', daemon=True)
+    thread.start()
+
+
 @app.get("/", response_class=HTMLResponse, tags=["page"])
 @app.get("/combined", response_class=HTMLResponse, tags=["page"])
 async def combined_page(request: Request, date: str = ''):
     """跳空放量涨幅合并策略页面"""
     data = _run_combined_strategy(date)
     suspect_codes = _load_suspect_codes()
-    return templates.TemplateResponse(request, "combined.html", {
+    response = templates.TemplateResponse(request, "combined.html", {
         "data": data,
         "backtest": _load_backtest_results(),
         "yearly_double": {'count': '-', 'items': [], 'start_date': '', 'scanned': 0},
@@ -626,6 +762,12 @@ async def combined_page(request: Request, date: str = ''):
         "date": date or data['today'],
         "suspect_codes": suspect_codes,
     })
+    # 页面内嵌 JS，改动后必须立即生效：禁止浏览器缓存整页，
+    # 否则会继续运行旧版脚本（例如 K 线切换按钮显示 0 的问题）。
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 

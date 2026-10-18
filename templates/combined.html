@@ -798,20 +798,32 @@ function updateKlineNav() {
         next.setAttribute('aria-label', '下一只股票（PgDn）');
         return;
     }
-    // 到顶/到底循环，按钮显示跳转后的目标序号（1 基）
-    const p = (klineNavIndex - 1 + n) % n;
-    const x = (klineNavIndex + 1) % n;
-    prev.textContent = p + 1;
-    next.textContent = x + 1;
-    prev.title = `上一只：第${p + 1}支（共${n}支，PgUp）`;
-    next.title = `下一只：第${x + 1}支（共${n}支，PgDn）`;
-    prev.setAttribute('aria-label', `上一只股票，第${p + 1}支（共${n}支）`);
-    next.setAttribute('aria-label', `下一只股票，第${x + 1}支（共${n}支）`);
+    // 按钮显示“跳转后的目标序号（1 基）”。
+    // prev 越过首位显示 0（表示没有上一只，但点击仍循环到最后一只）；
+    // next 越过末位回绕到第 1 只，因此显示 1。
+    const rawPrev = klineNavIndex - 1;
+    const rawNext = klineNavIndex + 1;
+    const showPrev = rawPrev < 0 ? 0 : rawPrev + 1;
+    const showNext = rawNext >= n ? 1 : rawNext + 1;
+    prev.textContent = showPrev;
+    next.textContent = showNext;
+    prev.title = showPrev
+        ? `上一只：第${showPrev}支（共${n}支，PgUp）`
+        : `已是第一只，上一只循环至第${n}支（共${n}支，PgUp）`;
+    next.title = rawNext >= n
+        ? `下一只：第1支（已是最后一只，循环，共${n}支，PgDn）`
+        : `下一只：第${showNext}支（共${n}支，PgDn）`;
+    prev.setAttribute('aria-label', showPrev
+        ? `上一只股票，第${showPrev}支（共${n}支）`
+        : `上一只股票，循环至第${n}支（共${n}支）`);
+    next.setAttribute('aria-label', rawNext >= n
+        ? `下一只股票，第1支（循环，共${n}支）`
+        : `下一只股票，第${showNext}支（共${n}支）`);
 }
 async function stepKlineStock(delta) {
     const n = klineNavCodes.length;
     if (!n || klineNavIndex < 0) return;
-    klineNavIndex = (klineNavIndex + delta + n) % n;
+    klineNavIndex = ((klineNavIndex + delta) % n + n) % n;
     currentFlagDate = klineNavFlagDates[klineNavIndex] || '';
     updateKlineNav();
     await openKline(klineNavCodes[klineNavIndex], null, true);

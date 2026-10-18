@@ -99,8 +99,8 @@ def run_daily_update(force=False, source='system'):
         return True
 
     # 步骤1：获取股票列表（优先从数据库读取，避免消耗stock_basic API配额）
-    logger.info("[1/6] 获取股票列表...")
-    _set_progress(message='[1/6] 获取股票列表…')
+    logger.info("[1/7] 获取股票列表...")
+    _set_progress(message='[1/7] 获取股票列表…')
     try:
         df = ld.getStockBasic(source=source)
         logger.info(f"从API获取到 {len(df)} 只股票基本信息")
@@ -111,8 +111,8 @@ def run_daily_update(force=False, source='system'):
     _set_progress(step=1)
 
     # 步骤2：将所有股票基本信息载入总表
-    logger.info("[2/6] 载入股票基本信息到总表 (loadAllBasic)...")
-    _set_progress(message='[2/6] 载入股票基本信息到总表…')
+    logger.info("[2/7] 载入股票基本信息到总表 (loadAllBasic)...")
+    _set_progress(message='[2/7] 载入股票基本信息到总表…')
     try:
         ld.loadAllBasic(df)
         logger.info("股票基本信息载入完成")
@@ -123,8 +123,8 @@ def run_daily_update(force=False, source='system'):
     _set_progress(step=2)
 
     # 步骤3：确保统一日线表存在
-    logger.info("[3/6] 确保 st_daily 日线表存在...")
-    _set_progress(message='[3/6] 检查 st_daily 日线表…')
+    logger.info("[3/7] 确保 st_daily 日线表存在...")
+    _set_progress(message='[3/7] 检查 st_daily 日线表…')
     try:
         ld.createStockTable(df)
         logger.info("st_daily 表检查完成")
@@ -135,8 +135,8 @@ def run_daily_update(force=False, source='system'):
     _set_progress(step=3)
 
     # 步骤4：增量加载日线数据（只补缺失天数，已存在的记录会跳过）
-    logger.info("[4/6] 增量加载日线数据...")
-    _set_progress(message='[4/6] 增量加载日线数据（耗时较久）…')
+    logger.info("[4/7] 增量加载日线数据...")
+    _set_progress(message='[4/7] 增量加载日线数据（耗时较久）…')
     try:
         ld.incrementalUpdateDailyData(df, lookback_days=30)
         logger.info("日线数据加载完成")
@@ -147,8 +147,8 @@ def run_daily_update(force=False, source='system'):
     _set_progress(step=4)
 
     # 步骤5：确认统一日线表可用（步骤4已直接写入）
-    logger.info("[5/6] 检查 st_daily 日线表...")
-    _set_progress(message='[5/6] 汇总 st_daily 日线表…')
+    logger.info("[5/7] 检查 st_daily 日线表...")
+    _set_progress(message='[5/7] 汇总 st_daily 日线表…')
     try:
         sp.createDailyTable()
         sp.buildDailyTable()
@@ -160,8 +160,8 @@ def run_daily_update(force=False, source='system'):
     _set_progress(step=5)
 
     # 步骤6：执行放量涨幅筛选
-    logger.info("[6/6] 执行放量涨幅筛选...")
-    _set_progress(message='[6/6] 执行放量涨幅筛选…')
+    logger.info("[6/7] 执行放量涨幅筛选...")
+    _set_progress(message='[6/7] 执行放量涨幅筛选…')
     try:
         sp.createSignalTable()
         result = sp.getLiangJiaFangLiang()
