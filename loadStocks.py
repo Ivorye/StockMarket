@@ -1,5 +1,6 @@
 import pymysql, pandas as pd, tushare as ts, time, datetime
 import db_utils
+import stock_basic_cache
 
 TUSHARE_TOKEN = "4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9"
 
@@ -11,27 +12,12 @@ def connectDB():
 
 
 
-#获取最新股票列表（调tushare API），同时缓存到stocks表
-#API失败时检查执行状态，状态为Y则直接从stocks表读取缓存
+#每天最多成功刷新一次；跨进程互斥及失败冷却避免反复消耗 stock_basic 配额。
 def getStockBasic(source='system'):
-	try:
-		pro = ts.pro_api(TUSHARE_TOKEN)
-		data = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,fullname,area,industry,list_date')
-		df=pd.DataFrame(data)
-		stored = _store_to_stocks(df)
-		today_date = datetime.date.today().strftime('%Y%m%d')
-		if stored:
-			db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='pymysql', source=source)
-		else:
-			print('股票列表写入stocks表失败，不标记执行状态为Y')
-		return df
-	except Exception as e:
-		today_date = datetime.date.today().strftime('%Y%m%d')
-		if db_utils.check_execution_status('stock_basic', exec_date=today_date, driver='pymysql'):
-			print('tushare API失败，st_execution_status状态为Y，从stocks表读取缓存')
-			return getStockBasicFromDB()
-		print('tushare API失败且无成功执行记录: %s'%e)
-		return getStockBasicFromDB()
+	return stock_basic_cache.get_stock_basic(
+		lambda: ts.pro_api(TUSHARE_TOKEN).stock_basic(
+			exchange='', list_status='L', fields='ts_code,symbol,name,fullname,area,industry,list_date'),
+		source=source)
 
 def _store_to_stocks(df):
 	"""把股票列表写入stocks表；返回是否全部写入成功（失败会打印并返回False）。"""

@@ -98,12 +98,16 @@ def run_daily_update(force=False, source='system'):
         _set_progress(step=_PROGRESS['total'], message='非交易日，已跳过', running=False, done=True, ok=True)
         return True
 
-    # 步骤1：获取股票列表（优先从数据库读取，避免消耗stock_basic API配额）
+    # 步骤1：当天成功刷新后读缓存；首次刷新及失败冷却由共享模块控制。
     logger.info("[1/7] 获取股票列表...")
     _set_progress(message='[1/7] 获取股票列表…')
     try:
         df = ld.getStockBasic(source=source)
-        logger.info(f"从API获取到 {len(df)} 只股票基本信息")
+        # 网页进程可能已缓存旧列表，更新后让后续策略重新读取 stocks。
+        sp._basic_cache = None
+        sp._basic_cache_date = None
+        logger.info("获取到 %s 只股票基本信息，来源=%s，说明=%s", len(df),
+                    df.attrs.get('stock_basic_source', 'unknown'), df.attrs.get('stock_basic_reason', ''))
     except Exception as e:
         logger.error(f"getStockBasic 执行失败: {e}")
         _set_progress(message=f'获取股票列表失败: {e}', running=False, done=True, ok=False, error=str(e))
