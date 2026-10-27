@@ -20,6 +20,9 @@
         .range-query { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0 12px; }
         .range-query label { font-size: 14px; color: #555; }
         .range-query input[type="number"] { margin-left: 6px; padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 100px; }
+        .range-query input[type="date"] { margin-left: 6px; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 150px; }
+        .range-query input:disabled { background: #f5f5f5; color: #bfbfbf; cursor: not-allowed; }
+        .range-or { color: #999; font-size: 13px; }
         .range-query button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .range-query button:disabled { background: #bfbfbf; cursor: not-allowed; }
         .btn-update-k-line { padding: 8px 20px; margin-left: 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #52c41a; color: #fff; }
@@ -604,17 +607,20 @@
     </div>
 
     <div class="panel" id="panel-range-gain">
-        <div class="strategy-note" id="range-gain-note">区间涨幅查询：取最近 A 个交易日的首日收盘价与末日收盘价计算累计涨幅，列出涨幅 ≥ B% 的全部股票（已剔除退市股）。表格中的「行业板块」列，点击「K线」后弹窗顶部会展示行业、最新业绩指标与区间内公司消息标签。</div>
+        <div class="strategy-note" id="range-gain-note">区间涨幅查询：按区间首日收盘价与末日收盘价计算累计涨幅，列出涨幅 ≥ B% 的全部股票（已剔除退市股）。区间有两种填法（二选一）：填「交易日数 A」取最近 A 个交易日；或填「交易起日 / 交易讫日」，只填起日则计算起日至最新交易日。表格中的「行业板块」列，点击「K线」后弹窗顶部会展示行业、最新业绩指标与区间内公司消息标签。</div>
         <div class="range-query">
-            <label>交易日数 A：<input type="number" id="range-days" value="10" min="1" max="250" step="1"></label>
-            <label>涨幅 B（%）：<input type="number" id="range-pct" value="30" step="0.1"></label>
+            <label>交易日数：<input type="number" id="range-days" value="10" min="1" max="250" step="1" oninput="syncRangeMode('days')"></label>
+            <span class="range-or">或</span>
+            <label>交易起日：<input type="date" id="range-start" oninput="syncRangeMode('date')" onchange="syncRangeMode('date')"></label>
+            <label>交易讫日：<input type="date" id="range-end" oninput="syncRangeMode('date')" onchange="syncRangeMode('date')"></label>
+            <label>涨幅（%）：<input type="number" id="range-pct" value="30" step="0.1"></label>
             <button type="button" class="btn-primary" id="range-run" onclick="loadRangeGain()">查询</button>
         </div>
         <div class="table-scroll" id="range-gain-table-wrap" style="display:none;"><table>
             <thead><tr><th>#</th><th>股票</th><th>名称</th><th>行业板块</th><th>起始日</th><th>起始收盘</th><th>结束日</th><th>结束收盘</th><th>区间涨幅</th></tr></thead>
             <tbody id="range-gain-body"></tbody>
         </table></div>
-        <div class="empty" id="range-gain-empty">输入交易日数 A 与涨幅 B%，点击“查询”后显示结果。</div>
+        <div class="empty" id="range-gain-empty">填写「交易日数 A」或「交易起日 / 交易讫日」（二选一）并设置涨幅 B%，点击“查询”后显示结果。</div>
     </div>
 
     <div class="panel" id="panel-backtest">
@@ -1210,33 +1216,96 @@ async function loadYearlyDouble() {
         if (runBtn) runBtn.disabled = false;
     }
 }
+// 交易日数 A 与交易起日/讫日互斥：一侧有输入，另一侧禁用并清空
+function syncRangeMode(source) {
+    const daysEl = document.getElementById('range-days');
+    const startEl = document.getElementById('range-start');
+    const endEl = document.getElementById('range-end');
+    if (!daysEl || !startEl || !endEl) return;
+    if (source === 'days' && daysEl.value.trim() !== '') {
+        startEl.value = '';
+        endEl.value = '';
+        startEl.disabled = true;
+        endEl.disabled = true;
+        return;
+    }
+    if (source === 'date' && (startEl.value || endEl.value)) {
+        daysEl.value = '';
+        daysEl.disabled = true;
+        return;
+    }
+    if (!daysEl.value.trim()) {
+        startEl.disabled = false;
+        endEl.disabled = false;
+    }
+    if (!startEl.value && !endEl.value) {
+        daysEl.disabled = false;
+    }
+}
+function toYmd(value) {
+    return (value || '').replace(/-/g, '');
+}
+function fmtYmd(ymd) {
+    return ymd ? `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}` : '';
+}
 async function loadRangeGain() {
     const note = document.getElementById('range-gain-note');
     const empty = document.getElementById('range-gain-empty');
     const wrap = document.getElementById('range-gain-table-wrap');
     const body = document.getElementById('range-gain-body');
     const runBtn = document.getElementById('range-run');
-    const days = parseInt(document.getElementById('range-days').value, 10);
+    const daysEl = document.getElementById('range-days');
+    const startEl = document.getElementById('range-start');
+    const endEl = document.getElementById('range-end');
     const pct = parseFloat(document.getElementById('range-pct').value);
     empty.style.display = 'block';
-    if (!Number.isFinite(days) || days < 1) {
-        empty.textContent = '请输入有效的交易日数 A（≥1）。';
-        return;
+
+    const startYmd = toYmd(startEl.value);
+    const endYmd = toYmd(endEl.value);
+    const dateMode = !!(startYmd || endYmd);
+    let days = null;
+    if (dateMode) {
+        if (!startYmd) {
+            empty.textContent = '请输入交易起日（仅输入讫日无法查询）。';
+            return;
+        }
+        if (endYmd && endYmd < startYmd) {
+            empty.textContent = '交易讫日不能早于交易起日。';
+            return;
+        }
+    } else {
+        days = parseInt(daysEl.value, 10);
+        if (!Number.isFinite(days) || days < 1) {
+            empty.textContent = '请输入有效的交易日数 A（≥1），或改用交易起日/讫日。';
+            return;
+        }
     }
     if (!Number.isFinite(pct)) {
         empty.textContent = '请输入有效的涨幅 B（%）。';
         return;
     }
+
+    let url = `/api/range-gain?pct=${encodeURIComponent(pct)}`;
+    if (dateMode) {
+        url += `&start=${encodeURIComponent(startYmd)}`;
+        if (endYmd) url += `&end=${encodeURIComponent(endYmd)}`;
+    } else {
+        url += `&days=${encodeURIComponent(days)}`;
+    }
+
     if (runBtn) {
         if (runBtn.disabled) return;
         runBtn.disabled = true;
         runBtn.textContent = '查询中…';
     }
     try {
-        const response = await fetch(`/api/range-gain?days=${encodeURIComponent(days)}&pct=${encodeURIComponent(pct)}`);
+        const response = await fetch(url);
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || '区间涨幅查询失败');
-        note.textContent = `区间 ${result.start_date} 至 ${result.end_date}（最近 ${result.days} 个交易日），首尾收盘价累计涨幅 ≥ ${result.pct}% 的股票，共 ${result.count} 只（扫描 ${result.scanned} 只，已剔除退市股）。`;
+        const span = result.mode === 'dates'
+            ? `交易起日 ${fmtYmd(result.start_date)} 至 交易讫日 ${fmtYmd(result.end_date)}（共 ${result.trading_days} 个交易日）`
+            : `最近 ${result.trading_days || result.days} 个交易日（${fmtYmd(result.start_date)} 至 ${fmtYmd(result.end_date)}）`;
+        note.textContent = `区间：${span}，首尾收盘价累计涨幅 ≥ ${result.pct}% 的股票，共 ${result.count} 只（扫描 ${result.scanned} 只，已剔除退市股）。`;
         const tabCount = document.getElementById('range-gain-tab-count');
         if (tabCount) tabCount.textContent = result.count;
         if (!result.items.length) {
@@ -1838,6 +1907,8 @@ function markSmallPoleMessageRows() {
 }
 document.addEventListener('DOMContentLoaded', markSmallPoleMessageRows);
 document.addEventListener('DOMContentLoaded', bindRowMsgHover);
+// 默认交易日数有值（10），据此进入「交易日数」模式并禁用两个日期框
+document.addEventListener('DOMContentLoaded', () => syncRangeMode('days'));
 window.addEventListener('resize', () => { hideFlagMsg(); if (overlay.classList.contains('open') && currentChartItems.length) drawKline(currentChartItems); });
 
 // ---- 30日平缓上涨：上涨理由弹窗（行业+经营业绩+技术面+区间公告）----

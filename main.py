@@ -789,9 +789,19 @@ async def yearly_double_data():
 
 
 @app.get("/api/range-gain", tags=["data"])
-async def range_gain_data(days: int = 10, pct: float = 30.0):
-    """最近 A 个交易日内，区间首尾累计涨幅 >= B% 的所有股票。"""
-    return _load_range_gain_results(days, pct)
+async def range_gain_data(days: int = 10, pct: float = 30.0, start: str = '', end: str = ''):
+    """区间首尾累计涨幅 >= B% 的股票。
+
+    - 传 start（交易起日，YYYYMMDD）时按日期模式：start~end（end 缺省为最新交易日）
+    - 否则按交易日数模式：最近 days 个交易日
+    """
+    if start and not re.fullmatch(r'\d{8}', start):
+        return JSONResponse({"error": "交易起日格式应为 YYYYMMDD"}, status_code=400)
+    if end and not re.fullmatch(r'\d{8}', end):
+        return JSONResponse({"error": "交易讫日格式应为 YYYYMMDD"}, status_code=400)
+    if end and not start:
+        return JSONResponse({"error": "请先输入交易起日"}, status_code=400)
+    return _load_range_gain_results(days, pct, start, end)
 
 
 def _recent_trade_dates(cursor, days):
@@ -803,9 +813,12 @@ def _recent_trade_dates(cursor, days):
     return sorted(r['trade_date'] for r in cursor.fetchall())
 
 
-def _load_range_gain_results(days=10, pct=30.0):
-    """最近 days 个交易日，按首尾收盘价计算累计涨幅 >= pct% 的所有股票。
+def _load_range_gain_results(days=10, pct=30.0, start_date='', end_date=''):
+    """按首尾收盘价计算累计涨幅 >= pct% 的所有股票。
 
+    两种区间口径（二选一）：
+    - 交易日数：最近 days 个交易日
+    - 日期：start_date ~ end_date（end_date 缺省为最新交易日）
     与年度翻倍股一致：剔除退市股，结果不截断（全部返回）。
     """
     try:
@@ -818,12 +831,15 @@ def _load_range_gain_results(days=10, pct=30.0):
         pct = 30.0
     days = max(1, min(days, 250))
 
+    date_mode = bool(start_date)
     result = {
         'available': False,
+        'mode': 'dates' if date_mode else 'days',
         'days': days,
         'pct': pct,
         'start_date': '',
         'end_date': '',
+        'trading_days': 0,
         'scanned': 0,
         'count': 0,
         'items': [],
@@ -832,10 +848,36 @@ def _load_range_gain_results(days=10, pct=30.0):
     try:
         cursor = db.cursor(pymysql.cursors.DictCursor)
         cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (120 * 1000,))
-        dates = _recent_trade_dates(cursor, days)
-        if not dates:
-            return result
-        start_date, end_date = dates[0], dates[-1]
+        if date_mode:
+            cursor.execute("SELECT MAX(trade_date) AS d FROM st_daily")
+            latest = (cursor.fetchone() or {}).get('d') or ''
+            if not latest:
+                return result
+            # 起日取 >= 输入起日的首个交易日；讫日取 <= 输入讫日的最后交易日（缺省为最新交易日）。
+            cursor.execute("SELECT MIN(trade_date) AS d FROM st_daily WHERE trade_date >= %s", (start_date,))
+            resolved_start = (cursor.fetchone() or {}).get('d')
+            if end_date:
+                cursor.execute("SELECT MAX(trade_date) AS d FROM st_daily WHERE trade_date <= %s", (end_date,))
+                resolved_end = (cursor.fetchone() or {}).get('d')
+            else:
+                resolved_end = latest
+            result['start_date'] = resolved_start or start_date
+            result['end_date'] = resolved_end or (end_date or latest)
+            if not resolved_start or not resolved_end or resolved_start > resolved_end:
+                result['available'] = True
+                return result
+            start_date, end_date = resolved_start, resolved_end
+            cursor.execute(
+                "SELECT COUNT(DISTINCT trade_date) AS c FROM st_daily WHERE trade_date BETWEEN %s AND %s",
+                (start_date, end_date),
+            )
+            result['trading_days'] = (cursor.fetchone() or {}).get('c') or 0
+        else:
+            dates = _recent_trade_dates(cursor, days)
+            if not dates:
+                return result
+            start_date, end_date = dates[0], dates[-1]
+            result['trading_days'] = len(dates)
 
         # 首日与末日各取一次收盘价，按代码对齐；要求两日都有有效收盘价。
         cursor.execute(
