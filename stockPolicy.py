@@ -12,54 +12,21 @@ TUSHARE_TOKEN = '4d47c02a8bb025881c9dd9e3c36d25139ab5b429a73353e566fc02a9'
 
 
 
-#延迟加载：优先从stocks表读取，回退到tushare API
+#延迟加载：策略优先使用本地列表；确实无缓存时，复用共享的限频刷新入口。
 _basic_cache = None
+_basic_cache_date = None
 def _get_stock_basic():
-	global _basic_cache
-	if _basic_cache is not None:
+	global _basic_cache, _basic_cache_date
+	today = datetime.date.today()
+	if _basic_cache is not None and _basic_cache_date == today:
 		return _basic_cache
-	#先从数据库读取
-	try:
-		mdb=_connect_sm()
-		mycsr=mdb.cursor()
-		mycsr.execute("SELECT COUNT(*) FROM stocks")
-		cnt=mycsr.fetchone()[0]
-		if cnt>0:
-			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
-			rows=mycsr.fetchall()
-			df=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
-			_basic_cache=df
-			mycsr.close();mdb.close()
-			return _basic_cache
-		mycsr.close();mdb.close()
-	except Exception:
-		pass
-	#回退到tushare API
-	try:
-		pro = ts.pro_api(TUSHARE_TOKEN)
-		_basic_cache = pro.query('stock_basic')
-		#缓存到stocks表
-		stored = _store_to_stocks(_basic_cache)
-		today_date = datetime.date.today().strftime('%Y%m%d')
-		if stored:
-			db_utils.update_execution_status('stock_basic','Y', exec_date=today_date, driver='mysql.connector')
-		else:
-			print('股票列表写入stocks表失败，不标记执行状态为Y')
-		return _basic_cache
-	except Exception as e:
-		today_date = datetime.date.today().strftime('%Y%m%d')
-		if db_utils.check_execution_status('stock_basic', exec_date=today_date, driver='mysql.connector'):
-			print('tushare API失败，st_execution_status状态为Y，从stocks表重试读取')
-			mdb=_connect_sm()
-			mycsr=mdb.cursor()
-			mycsr.execute("SELECT st_code AS ts_code,symbol,name,fullname,list_date FROM stocks")
-			rows=mycsr.fetchall()
-			mycsr.close();mdb.close()
-			if rows:
-				_basic_cache=DataFrame(rows,columns=['ts_code','symbol','name','fullname','list_date'])
-				return _basic_cache
-		print('tushare API失败且无成功执行记录: %s'%e)
-		raise
+	import loadStocks as ld
+	# 数据库异常直接向上传播，不再吞掉异常后让每个策略重复请求 API。
+	_basic_cache = ld.getStockBasicFromDB()
+	if _basic_cache is None or _basic_cache.empty:
+		_basic_cache = ld.getStockBasic()
+	_basic_cache_date = today
+	return _basic_cache
 
 def _store_to_stocks(df):
 	"""把股票列表写入stocks表；返回是否全部写入成功（失败会打印并返回False）。"""
@@ -99,7 +66,19 @@ def _get_daily_from_db(symbol, startDate, endDate):
 def _connect_sm():
 	return mysql.connector.connect(host="localhost",user="root",passwd="P@ssw0rd",database='stockshare',connection_timeout=10)
 
-#通用筛选条件：剔除科创板(688)、ST、*ST、次新股(2021年后上市且上市晚于startDate)
+def _is_delisted(name):
+	"""判断股票简称是否已退市：退市股简称形如 '退市XX' 或 'XX退'。"""
+	if name is None:
+		return False
+	try:
+		text = str(name).strip()
+	except Exception:
+		return False
+	if not text or text.lower() == 'nan':
+		return False
+	return text.startswith('退市') or text.endswith('退')
+
+#通用筛选条件：剔除科创板(688)、ST、*ST、退市股、次新股(2021年后上市且上市晚于startDate)
 def _should_skip(df, i, startDate=''):
 	sym = df.symbol[i]
 	name = df.name[i]
@@ -107,6 +86,8 @@ def _should_skip(df, i, startDate=''):
 	if sym[0:3] == '688':
 		return True
 	if name[0:2] == 'ST' or name[0:2] == '*S':
+		return True
+	if _is_delisted(name):
 		return True
 	#原逻辑：list_date < '20210101' AND list_date < startDate 两个条件同时满足才不排除
 	if lst >= '20210101' and (not startDate or lst >= startDate):

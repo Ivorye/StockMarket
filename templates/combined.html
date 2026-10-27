@@ -17,6 +17,11 @@
         .controls button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .btn-primary { background: #1677ff; color: #fff; }
         .btn-primary:hover { background: #4096ff; }
+        .range-query { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 10px 0 12px; }
+        .range-query label { font-size: 14px; color: #555; }
+        .range-query input[type="number"] { margin-left: 6px; padding: 7px 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 100px; }
+        .range-query button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        .range-query button:disabled { background: #bfbfbf; cursor: not-allowed; }
         .btn-update-k-line { padding: 8px 20px; margin-left: 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #52c41a; color: #fff; }
         .btn-update-k-line:hover { background: #73d13d; }
         .btn-update-k-line:disabled { background: #bfbfbf; cursor: not-allowed; }
@@ -137,6 +142,34 @@
         .kline-msg a { color: #1677ff; text-decoration: none; }
         .kline-msg a:hover { text-decoration: underline; }
         .kline-msg-empty { color: #999; }
+        /* K 线顶部标签条：行业板块 + 业绩指标 + 区间消息 */
+        .kline-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #f0f0f0; background: #fafcff; }
+        .kline-tags[hidden] { display: none; }
+        .kline-tags-label { color: #888; font-size: 12px; margin-right: 2px; }
+        .kline-tags-empty { color: #999; font-size: 12px; }
+        .kline-tag { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 11px; font-size: 12px; line-height: 1.5; white-space: nowrap; border: 1px solid transparent; }
+        .kline-tag.industry { background: #e6f4ff; color: #0958d9; border-color: #bae0ff; font-weight: 600; }
+        .kline-tag.fund { background: #f6ffed; color: #389e0d; border-color: #d9f7be; }
+        .kline-tag.fund.neg { background: #fff1f0; color: #cf1322; border-color: #ffccc7; }
+        .kline-tag.msg { background: #fff7e6; color: #d46b08; border-color: #ffd591; text-decoration: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+        .kline-tag.msg:hover { background: #ffe7ba; }
+        .kline-tag.count { background: #f5f5f5; color: #595959; border-color: #e8e8e8; }
+        .kline-tag.err { background: #fff2f0; color: #cf1322; border-color: #ffccc7; }
+        /* 近一年消息列表（放量涨幅 K 线专用） */
+        .kline-notes { margin-top: 10px; border: 1px solid #eee; border-radius: 6px; background: #fafafa; }
+        .kline-notes[hidden] { display: none; }
+        .kline-notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px; border-bottom: 1px solid #eee; color: #d46b08; font-size: 12px; font-weight: 600; }
+        .kline-notes-head span.muted { color: #999; font-weight: 400; }
+        .kline-notes-body { max-height: 132px; overflow-y: auto; padding: 6px 10px; font-size: 12px; line-height: 1.7; }
+        .kline-notes-day { display: flex; gap: 8px; align-items: baseline; }
+        .kline-notes-day a.kline-notes-date { flex: none; color: #1677ff; text-decoration: none; font-variant-numeric: tabular-nums; }
+        .kline-notes-day a.kline-notes-date:hover { text-decoration: underline; }
+        .kline-notes-day.is-flag a.kline-notes-date { color: #d46b08; font-weight: 600; }
+        .kline-notes-day.not-traded a.kline-notes-date { color: #999; text-decoration: line-through; }
+        .kline-notes-day .kline-notes-titles { color: #444; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .kline-notes-day .kline-notes-titles a { color: inherit; text-decoration: none; }
+        .kline-notes-day .kline-notes-titles a:hover { color: #1677ff; text-decoration: underline; }
+        .kline-notes-empty { padding: 8px 10px; color: #999; font-size: 12px; }
         .kline-hover { position: absolute; z-index: 5; pointer-events: none; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 6px; background: rgba(255,255,255,.97); box-shadow: 0 4px 14px rgba(0,0,0,.14); color: #333; font-size: 12px; line-height: 1.6; white-space: nowrap; font-family: "Cascadia Code", "Consolas", monospace; }
         .kline-hover[hidden] { display: none; }
         .kline-hover .lh-date { color: #888; margin-bottom: 2px; }
@@ -274,6 +307,7 @@
         <div class="tab" onclick="switchTab(event, 'gap')">跳空缺口 ({{ data.s2 | length }})</div>
         <div class="tab" onclick="switchTab(event, 'surge')">放量涨幅 ({{ data.s1 | length }})</div>
         <div class="tab" onclick="switchTab(event, 'yearly-double')">年度翻倍股 (<span id="yearly-double-tab-count">{{ yearly_double.count }}</span>)</div>
+        <div class="tab" onclick="switchTab(event, 'range-gain')">区间涨幅查询 (<span id="range-gain-tab-count">-</span>)</div>
         <div class="tab" onclick="switchTab(event, 'backtest')">回测结果{% if backtest.available %} ({{ backtest.signal_count }}){% endif %}</div>
     </div>
 
@@ -503,7 +537,7 @@
     <!-- 放量涨幅面板 -->
     <div class="panel" id="panel-surge">
         {% if data.s1 %}
-        <div class="section-title">说明：仅满足放量>=3倍且涨幅>6%，不要求跳空缺口</div>
+        <div class="section-title">说明：仅满足放量>=3倍且涨幅>6%，不要求跳空缺口；K线会标出近一年公告并列出清单</div>
         <div class="table-scroll">
         <table>
             <thead>
@@ -521,7 +555,7 @@
                 {% for r in data.s1 %}
                 <tr {% if r.has_gap and r.is_surge and r.big_gain %}class="highlight-row"{% endif %}>
                     <td>{{ loop.index }}</td>
-                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
+                    <td class="code"><a href="{{ eastmoney_url(r.st_code) }}" target="_blank" title="在东方财富查看">{{ r.st_code }}</a><button class="kline-trigger" data-code="{{ r.st_code }}" data-note-mode="year" onclick="openKline('{{ r.st_code }}', this)">K线</button><button class="kline-preview-trigger" data-code="{{ r.st_code }}" type="button">预览</button></td>
                     {{ name_cell(r.st_code, r.name) }}
                     <td>
                         {% if r.pct_chg >= 10 %}
@@ -569,6 +603,20 @@
         <div class="empty" id="yearly-double-empty">尚未扫描，点击上方“扫描年度翻倍股”按钮后显示结果。</div>
     </div>
 
+    <div class="panel" id="panel-range-gain">
+        <div class="strategy-note" id="range-gain-note">区间涨幅查询：取最近 A 个交易日的首日收盘价与末日收盘价计算累计涨幅，列出涨幅 ≥ B% 的全部股票（已剔除退市股）。表格中的「行业板块」列，点击「K线」后弹窗顶部会展示行业、最新业绩指标与区间内公司消息标签。</div>
+        <div class="range-query">
+            <label>交易日数 A：<input type="number" id="range-days" value="10" min="1" max="250" step="1"></label>
+            <label>涨幅 B（%）：<input type="number" id="range-pct" value="30" step="0.1"></label>
+            <button type="button" class="btn-primary" id="range-run" onclick="loadRangeGain()">查询</button>
+        </div>
+        <div class="table-scroll" id="range-gain-table-wrap" style="display:none;"><table>
+            <thead><tr><th>#</th><th>股票</th><th>名称</th><th>行业板块</th><th>起始日</th><th>起始收盘</th><th>结束日</th><th>结束收盘</th><th>区间涨幅</th></tr></thead>
+            <tbody id="range-gain-body"></tbody>
+        </table></div>
+        <div class="empty" id="range-gain-empty">输入交易日数 A 与涨幅 B%，点击“查询”后显示结果。</div>
+    </div>
+
     <div class="panel" id="panel-backtest">
         {% if backtest.available %}
         <div class="backtest-verdict"><strong>结论：</strong>{{ backtest.conclusion }}</div>
@@ -601,7 +649,9 @@
 <div class="chart-overlay" id="chart-overlay" role="dialog" aria-modal="true" aria-labelledby="chart-title" tabindex="-1" onclick="if(event.target===this)closeKline()">
     <section class="chart-drawer">
         <header class="chart-header"><div><span class="chart-title" id="chart-title">K线</span><span class="chart-meta" id="chart-meta"></span></div><div class="chart-actions"><div class="chart-step" aria-label="移动 K 线截止交易日"><button id="date-prev" onclick="shiftKlineDate(-1)" aria-label="往前一个交易日">&lt;</button><button id="date-next" onclick="shiftKlineDate(1)" aria-label="往后一个交易日">&gt;</button></div><div class="chart-range" aria-label="调整 K 线缩放"><button id="range-more" onclick="changeKlineRange(60)" aria-label="缩小 K 线，增加60个交易日" title="缩小：增加60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6"></path></svg></button><span id="range-label">120日</span><button id="range-less" onclick="changeKlineRange(-60)" aria-label="放大 K 线，减少60个交易日" title="放大：减少60个交易日"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="M15.5 15.5 21 21M7.5 10.5h6M10.5 7.5v6"></path></svg></button></div><div class="chart-stock" aria-label="切换上下只股票"><button id="stock-prev" onclick="stepKlineStock(-1)" aria-label="上一只股票" title="上一只股票（PgUp）" disabled>–</button><button id="stock-next" onclick="stepKlineStock(1)" aria-label="下一只股票" title="下一只股票（PgDn）" disabled>–</button></div><button class="chart-latest" id="chart-latest" onclick="showLatestKline()">最新K线</button><button class="chart-close" onclick="closeKline()" aria-label="关闭 K 线">×</button></div></header>
+            <div class="kline-tags" id="kline-tags" hidden></div>
             <div class="chart-stage"><canvas id="kline-canvas"></canvas><canvas id="kline-crosshair"></canvas><div class="chart-status" id="chart-status">正在加载行情…</div><div class="kline-msg" id="kline-msg" role="tooltip" hidden></div><div class="kline-hover" id="kline-hover" hidden></div></div>
+            <div class="kline-notes" id="kline-notes" hidden><div class="kline-notes-head"><span>近一年公司消息 <span class="muted" id="kline-notes-count"></span></span><span class="muted">点击日期在 K 线上定位</span></div><div class="kline-notes-body" id="kline-notes-body"></div></div>
     </section>
 </div>
 <div class="kline-preview" id="kline-preview" aria-hidden="true">
@@ -757,9 +807,16 @@ let previewRequest = null;
 const klineCache = new Map();
 let klineNavCodes = [];
 let klineNavIndex = -1;
-// 旗杆日图标 + 当天消息提示（仅小旗杆面板的 K 线按钮带 data-flag-date）
+// 旗杆日图标 + 当天消息提示（小旗杆面板的 K 线按钮带 data-flag-date）
 let klineNavFlagDates = [];
 let currentFlagDate = '';      // 当前 K 线对应股票的旗杆日 YYYYMMDD，非小旗杆为空
+// 近一年消息标注（放量涨幅面板的 K 线按钮带 data-note-mode="year"）
+let klineNavNoteModes = [];
+let currentNoteMode = '';      // 'year' 时在 K 线上标出近一年每个有公告的交易日
+let currentNoteMessages = [];  // 近一年公告列表 [{date,title,url}]
+let noteIconHits = [];         // K 线上消息标注点的命中区 [{x, y, r, index, date}]
+let noteLoadToken = 0;         // 防止快速切换股票时旧请求覆盖新数据
+const noteCache = new Map();   // code -> messages，避免重复请求
 let flagIconHit = null;        // 主画布上小旗图标命中区 {x, y, r, index}
 let chartGeom = null;          // 主画布几何信息，供鼠标反查蜡烛序号
 let msgTimer = null;
@@ -770,6 +827,13 @@ const msgBox = document.getElementById('kline-msg');
 const hoverBox = document.getElementById('kline-hover');
 const crossCanvas = document.getElementById('kline-crosshair');
 const crossCtx = crossCanvas.getContext('2d');
+const notesPanel = document.getElementById('kline-notes');
+const notesBody = document.getElementById('kline-notes-body');
+const notesCount = document.getElementById('kline-notes-count');
+// K 线顶部标签条（行业板块 / 最新业绩 / 区间消息）
+let currentTagRange = null;    // {start, end} 或 null
+let tagLoadToken = 0;
+const tagsBar = document.getElementById('kline-tags');
 // 记录来源列表（按当前排序后的 DOM 顺序），供 ▲▼ / PgUp/PgDn 切换上下只股票
 function setKlineNav(triggerEl, code) {
     const table = triggerEl && triggerEl.closest ? triggerEl.closest('table') : null;
@@ -778,9 +842,10 @@ function setKlineNav(triggerEl, code) {
             .filter(b => b.dataset.code);
         klineNavCodes = buttons.map(b => b.dataset.code);
         klineNavFlagDates = buttons.map(b => b.dataset.flagDate || '');
+        klineNavNoteModes = buttons.map(b => b.dataset.noteMode || '');
         klineNavIndex = klineNavCodes.indexOf(code);
     } else {
-        klineNavCodes = []; klineNavFlagDates = []; klineNavIndex = -1;
+        klineNavCodes = []; klineNavFlagDates = []; klineNavNoteModes = []; klineNavIndex = -1;
     }
     updateKlineNav();
 }
@@ -825,6 +890,7 @@ async function stepKlineStock(delta) {
     if (!n || klineNavIndex < 0) return;
     klineNavIndex = ((klineNavIndex + delta) % n + n) % n;
     currentFlagDate = klineNavFlagDates[klineNavIndex] || '';
+    currentNoteMode = klineNavNoteModes[klineNavIndex] || '';
     updateKlineNav();
     await openKline(klineNavCodes[klineNavIndex], null, true);
 }
@@ -832,12 +898,24 @@ async function openKline(code, triggerEl, keepNav = false) {
     if (!keepNav) {
         setKlineNav(triggerEl, code);
         lastChartButton = triggerEl || document.activeElement;
-        // 只有小旗杆面板的按钮带 data-flag-date，其余来源（搜索/年度翻倍）无旗杆日
+        // 小旗杆面板的按钮带 data-flag-date；放量涨幅面板的按钮带 data-note-mode="year"
         currentFlagDate = (triggerEl && triggerEl.dataset && triggerEl.dataset.flagDate) || '';
+        currentNoteMode = (triggerEl && triggerEl.dataset && triggerEl.dataset.noteMode) || '';
+        // 区间涨幅面板的 K线按钮带 data-tag-mode="range"，用于展示行业/业绩/区间消息标签
+        const tagMode = (triggerEl && triggerEl.dataset && triggerEl.dataset.tagMode) || '';
+        currentTagRange = (tagMode === 'range')
+            ? {start: triggerEl.dataset.rangeStart || '', end: triggerEl.dataset.rangeEnd || ''}
+            : null;
         hideFlagMsg();
     }
+    hideKlineTags();
+    // 切换股票时先清掉上一只的消息标注，避免新 K 线短暂显示旧数据
+    currentNoteMessages = [];
+    hideNotesPanel();
     currentChartCode = code;
     if (!keepNav) currentChartDays = 120;
+    // 放量涨幅面板需要完整一年 K 线才能逐日标注消息：默认直接加载 240 日
+    if (currentNoteMode === 'year') currentChartDays = 240;
     currentChartLatest = false;
     currentChartEndDate = '{{ data.today }}';
     updateRangeControls();
@@ -855,6 +933,10 @@ async function openKline(code, triggerEl, keepNav = false) {
         setKlineMeta(currentChartDays, data);
         updateDateControls();
         statusEl.style.display = 'none'; drawKline(currentChartItems);
+        // 放量涨幅面板：加载近一年消息，在 K 线上逐日标注并列出清单
+        if (currentNoteMode === 'year') loadYearMessages(code);
+        // 区间涨幅面板：加载行业/业绩/区间消息标签
+        if (currentTagRange) loadKlineTags(code, currentTagRange.start, currentTagRange.end);
     } catch (error) { statusEl.textContent = error.message; }
 }
 async function showLatestKline() {
@@ -915,6 +997,8 @@ async function changeKlineRange(delta) {
     const nextDays = Math.max(60, Math.min(240, currentChartDays + delta));
     if (nextDays === currentChartDays || !currentChartCode) return;
     currentChartDays = nextDays; updateRangeControls();
+    // 近一年消息需要完整一年 K 线才能逐日标注：切到 240 日
+    if (currentNoteMode === 'year' && currentChartDays < 240) currentChartDays = 240;
     statusEl.style.display = 'grid'; statusEl.textContent = `正在加载${currentChartDays}个交易日…`;
     try {
         const endDate = currentChartLatest ? '' : currentChartEndDate;
@@ -923,6 +1007,7 @@ async function changeKlineRange(delta) {
         currentChartItems = data.items;
         setKlineMeta(currentChartDays, data, currentChartLatest ? ` · 更新至 ${data.items[data.items.length - 1].date}` : '');
         statusEl.style.display = 'none'; drawKline(currentChartItems);
+        if (currentNoteMode === 'year') renderNotesPanel();
     } catch (error) { statusEl.textContent = error.message; }
 }
 function updateRangeControls() {
@@ -930,7 +1015,85 @@ function updateRangeControls() {
     document.getElementById('range-more').disabled = currentChartDays >= 240;
     document.getElementById('range-less').disabled = currentChartDays <= 60;
 }
-function closeKline() { overlay.classList.remove('open'); hideFlagMsg(); if (lastChartButton) lastChartButton.focus(); }
+function closeKline() { overlay.classList.remove('open'); hideFlagMsg(); hideNotesPanel(); hideKlineTags(); if (lastChartButton) lastChartButton.focus(); }
+// ---- K 线顶部标签条：行业板块 + 最新业绩 + 区间消息 ----
+function hideKlineTags() {
+    tagLoadToken++;
+    if (!tagsBar) return;
+    tagsBar.hidden = true;
+    tagsBar.innerHTML = '';
+}
+async function loadKlineTags(code, start, end) {
+    if (!tagsBar) return;
+    const token = ++tagLoadToken;
+    tagsBar.hidden = false;
+    tagsBar.innerHTML = '<span class="kline-tags-empty">正在加载行业 / 业绩 / 消息…</span>';
+    try {
+        const qs = new URLSearchParams();
+        if (start) qs.set('start', start);
+        if (end) qs.set('end', end);
+        const response = await fetch(`/api/kline-tags/${encodeURIComponent(code)}?${qs.toString()}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '标签加载失败');
+        if (token !== tagLoadToken || currentChartCode !== code) return;
+        renderKlineTags(data);
+    } catch (error) {
+        if (token !== tagLoadToken) return;
+        tagsBar.innerHTML = `<span class="kline-tag err">标签加载失败：${escapeHtml(error.message)}</span>`;
+        tagsBar.hidden = false;
+    }
+}
+function renderKlineTags(data) {
+    if (!tagsBar) return;
+    const tags = [];
+    if (data.industry) {
+        tags.push(`<span class="kline-tag industry" title="行业板块">${escapeHtml(data.industry)}</span>`);
+    }
+    const f = data.fundamental || {};
+    const addFund = (label, value, suffix = '', cls = '') => {
+        if (value == null || value === '') return;
+        const text = typeof value === 'number' ? value.toFixed(2) : String(value);
+        tags.push(`<span class="kline-tag fund ${cls}" title="最新财务指标：${escapeHtml(label)}">${escapeHtml(label)} ${escapeHtml(text)}${escapeHtml(suffix)}</span>`);
+    };
+    if (f.report_name) {
+        tags.push(`<span class="kline-tag count" title="财务数据报告期">${escapeHtml(f.report_name)}</span>`);
+    }
+    addFund('净利润', f.net_profit, '亿');
+    addFund('营收', f.revenue, '亿');
+    addFund('净利同比', f.profit_yoy, '%', (f.profit_yoy != null && f.profit_yoy < 0) ? 'neg' : '');
+    addFund('营收同比', f.revenue_yoy, '%', (f.revenue_yoy != null && f.revenue_yoy < 0) ? 'neg' : '');
+    addFund('ROE', f.roe, '%');
+    addFund('毛利率', f.gross_margin, '%');
+    addFund('PE', f.pe, '');
+    if (data.fundamental_error) {
+        tags.push(`<span class="kline-tag err" title="${escapeHtml(data.fundamental_error)}">业绩 N/A</span>`);
+    }
+    const msgs = data.messages || [];
+    if (msgs.length) {
+        tags.push(`<span class="kline-tag count" title="区间内公告数量">消息 ${msgs.length} 条</span>`);
+        msgs.slice(0, 8).forEach(m => {
+            const d = m.date || '';
+            const dd = d ? `${d.slice(4, 6)}-${d.slice(6, 8)}` : '';
+            const full = (d ? d + ' ' : '') + (m.title || '');
+            tags.push(`<a class="kline-tag msg" href="${escapeHtml(m.url || '#')}" target="_blank" rel="noopener" title="${escapeHtml(full)}">${dd ? dd + ' ' : ''}${escapeHtml(m.title || '')}</a>`);
+        });
+        if (msgs.length > 8) tags.push(`<span class="kline-tag count">+${msgs.length - 8}</span>`);
+    } else if (data.start_date && data.end_date && !data.announcements_error) {
+        tags.push('<span class="kline-tag count" title="区间内无公告">区间无公告</span>');
+    }
+    if (data.announcements_error) {
+        tags.push(`<span class="kline-tag err" title="${escapeHtml(data.announcements_error)}">公告 N/A</span>`);
+    }
+    if (!tags.length) {
+        tagsBar.innerHTML = '<span class="kline-tags-empty">暂无行业 / 业绩 / 消息标签</span>';
+        tagsBar.hidden = false;
+        return;
+    }
+    const rangeLabel = (data.start_date && data.end_date)
+        ? `<span class="kline-tags-label">区间 ${escapeHtml(data.start_date)}~${escapeHtml(data.end_date)}</span>` : '';
+    tagsBar.innerHTML = rangeLabel + tags.join('');
+    tagsBar.hidden = false;
+}
 document.addEventListener('keydown', event => {
     if (!overlay.classList.contains('open')) return;
     if (event.key === 'Escape') { closeKline(); return; }
@@ -1047,6 +1210,66 @@ async function loadYearlyDouble() {
         if (runBtn) runBtn.disabled = false;
     }
 }
+async function loadRangeGain() {
+    const note = document.getElementById('range-gain-note');
+    const empty = document.getElementById('range-gain-empty');
+    const wrap = document.getElementById('range-gain-table-wrap');
+    const body = document.getElementById('range-gain-body');
+    const runBtn = document.getElementById('range-run');
+    const days = parseInt(document.getElementById('range-days').value, 10);
+    const pct = parseFloat(document.getElementById('range-pct').value);
+    empty.style.display = 'block';
+    if (!Number.isFinite(days) || days < 1) {
+        empty.textContent = '请输入有效的交易日数 A（≥1）。';
+        return;
+    }
+    if (!Number.isFinite(pct)) {
+        empty.textContent = '请输入有效的涨幅 B（%）。';
+        return;
+    }
+    if (runBtn) {
+        if (runBtn.disabled) return;
+        runBtn.disabled = true;
+        runBtn.textContent = '查询中…';
+    }
+    try {
+        const response = await fetch(`/api/range-gain?days=${encodeURIComponent(days)}&pct=${encodeURIComponent(pct)}`);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '区间涨幅查询失败');
+        note.textContent = `区间 ${result.start_date} 至 ${result.end_date}（最近 ${result.days} 个交易日），首尾收盘价累计涨幅 ≥ ${result.pct}% 的股票，共 ${result.count} 只（扫描 ${result.scanned} 只，已剔除退市股）。`;
+        const tabCount = document.getElementById('range-gain-tab-count');
+        if (tabCount) tabCount.textContent = result.count;
+        if (!result.items.length) {
+            body.innerHTML = '';
+            wrap.style.display = 'none';
+            empty.textContent = '该区间内没有达到该涨幅的股票。';
+            empty.style.display = 'block';
+            return;
+        }
+        body.innerHTML = result.items.map((r, index) => `
+            <tr>
+                <td>${index + 1}</td>
+                <td class="code"><a href="${escapeHtml(r.eastmoney_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.st_code)}</a><button class="kline-trigger" data-code="${escapeHtml(r.st_code)}" data-tag-mode="range" data-range-start="${escapeHtml(r.start_date)}" data-range-end="${escapeHtml(r.end_date)}" onclick="openKline('${escapeHtml(r.st_code)}', this)">K线</button><button class="kline-preview-trigger" data-code="${escapeHtml(r.st_code)}" type="button">预览</button></td>
+                <td>${escapeHtml(r.name)}</td>
+                <td>${r.industry ? `<span class="tag tag-blue">${escapeHtml(r.industry)}</span>` : '-'}</td>
+                <td>${escapeHtml(r.start_date)}</td>
+                <td>${Number(r.start_close).toFixed(2)}</td>
+                <td>${escapeHtml(r.end_date)}</td>
+                <td>${Number(r.end_close).toFixed(2)}</td>
+                <td><span class="tag tag-red">${Number(r.gain_pct).toFixed(2)}%</span></td>
+            </tr>`).join('');
+        empty.style.display = 'none';
+        wrap.style.display = 'block';
+        bindPreviewTriggers(wrap);
+        if (runBtn) runBtn.textContent = '重新查询';
+    } catch (error) {
+        empty.textContent = error.message;
+        empty.style.display = 'block';
+        if (runBtn) runBtn.textContent = '查询';
+    } finally {
+        if (runBtn) runBtn.disabled = false;
+    }
+}
 // 年度翻倍股默认不查询，仅在点击面板内按钮后触发
 let suggestTimer = null;
 let latestCandidates = [];
@@ -1141,8 +1364,27 @@ function drawKline(items, targetCanvas = canvas) {
     items.forEach((d,i)=>{const x=left+step*(i+.5),up=d.close>=d.open,color=up?'#cf1322':'#389e0d';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(x,y(d.high));ctx.lineTo(x,y(d.low));ctx.stroke();const yo=y(Math.max(d.open,d.close)),bh=Math.max(1,Math.abs(y(d.open)-y(d.close)));ctx.fillRect(x-body/2,yo,body,bh);const vh=(d.volume/maxV)*(bottom-volTop);ctx.globalAlpha=.48;ctx.fillRect(x-body/2,bottom-vh,body,vh);ctx.globalAlpha=1;});
     ctx.fillStyle='#888'; const labels=[0,Math.floor((items.length-1)/2),items.length-1]; labels.forEach(i=>{const x=left+step*(i+.5);ctx.fillText(items[i].date.slice(4,6)+'-'+items[i].date.slice(6,8),x-15,h-8);});
     ctx.fillText('成交量(万手)',4,volTop+10);
-    // 旗杆日：高亮该日蜡烛，并在最高价上方画小旗图标（仅主画布，预览不画）
+    // 近一年消息：在每条公告所在交易日的蜡烛上方画标注点（先画在底层，再画旗杆/信号图标）
     if (targetCanvas !== canvas) return;
+    noteIconHits = [];
+    if (currentNoteMode === 'year' && currentNoteMessages.length) {
+        const noteIdx = new Map();
+        items.forEach((d, i) => noteIdx.set(d.date, i));
+        ctx.save();
+        noteIconHits = currentNoteMessages.filter(m => noteIdx.has(m.date)).map(m => {
+            const i = noteIdx.get(m.date), bar = items[i];
+            const x = left + step * (i + .5);
+            // 倒三角尖朝下，贴在蜡烛实体顶部（阳线看收盘、阴线看开盘），最少留出顶部边距
+            const bodyTop = y(Math.max(bar.open, bar.close));
+            const tip = Math.max(top + 8, bodyTop - 3);
+            ctx.beginPath(); ctx.moveTo(x, tip); ctx.lineTo(x - 3.5, tip - 6);
+            ctx.lineTo(x + 3.5, tip - 6); ctx.closePath();
+            ctx.fillStyle = '#1677ff'; ctx.fill();
+            return {x, y: tip - 3, r: 6, index: i, date: m.date};
+        });
+        ctx.restore();
+    }
+    // 旗杆日：高亮该日蜡烛，并在最高价上方画小旗图标（仅主画布，预览不画）
     chartGeom = {left, step, top, priceBottom, count: items.length,
                  maxP, minP, range, volTop, bottom, maxV};
     flagIconHit = null;
@@ -1167,6 +1409,127 @@ function drawKline(items, targetCanvas = canvas) {
 }
 // ---- 旗杆日悬停：展示当天重要消息（东财公告，按 code|date 缓存）----
 function fmtFlagDate(value) { return value ? `${value.slice(0,4)}-${value.slice(4,6)}-${value.slice(6,8)}` : ''; }
+// ---- 放量涨幅：近一年消息标注（当前 K 线区间内逐日打点 + 下方列表）----
+function hideNotesPanel() {
+    noteIconHits = [];
+    if (notesPanel) notesPanel.hidden = true;
+    if (notesBody) notesBody.innerHTML = '';
+    if (notesCount) notesCount.textContent = '';
+}
+async function loadYearMessages(code) {
+    const token = ++noteLoadToken;
+    showNotesLoading();
+    try {
+        let messages = noteCache.get(code);
+        if (!messages) {
+            const response = await fetch(`/api/messages/${encodeURIComponent(code)}?days=365`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || '消息请求失败');
+            messages = (data.messages || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            noteCache.set(code, messages);
+        }
+        // 期间用户已切换到别的股票/关闭面板：丢弃本次结果
+        if (token !== noteLoadToken || currentChartCode !== code || currentNoteMode !== 'year') return;
+        currentNoteMessages = messages;
+        drawKline(currentChartItems);
+        renderNotesPanel();
+    } catch (error) {
+        if (token !== noteLoadToken || currentChartCode !== code) return;
+        currentNoteMessages = [];
+        drawKline(currentChartItems);
+        showNotesError(error.message);
+    }
+}
+function showNotesLoading() {
+    if (!notesPanel) return;
+    notesCount.textContent = '';
+    notesBody.innerHTML = '<div class="kline-notes-empty">正在加载近一年消息…</div>';
+    notesPanel.hidden = false;
+}
+function showNotesError(message) {
+    if (!notesPanel) return;
+    notesCount.textContent = '';
+    notesBody.innerHTML = `<div class="kline-notes-empty">消息加载失败：${escapeHtml(message)}</div>`;
+    notesPanel.hidden = false;
+}
+// 只列出当前 K 线区间内（最早/最晚交易日之间）的公告，与图上标注保持一致
+function renderNotesPanel() {
+    if (!notesPanel) return;
+    if (currentNoteMode !== 'year' || !currentChartItems.length) { hideNotesPanel(); return; }
+    const first = currentChartItems[0].date, last = currentChartItems[currentChartItems.length - 1].date;
+    const rows = currentNoteMessages.filter(m => m.date >= first && m.date <= last);
+    const markedCount = rows.filter(m => currentChartItems.some(d => d.date === m.date)).length;
+    notesCount.textContent = rows.length
+        ? `（共 ${rows.length} 条，图中标注 ${markedCount} 条）`
+        : `（${first} 至 ${last} 无公告）`;
+    if (!rows.length) {
+        notesBody.innerHTML = '<div class="kline-notes-empty">当前 K 线区间内该股没有公告</div>';
+        notesPanel.hidden = false;
+        return;
+    }
+    const noName = [];
+    // 同一天多条公告合并成一行，便于扫读
+    const byDay = new Map();
+    rows.forEach(m => {
+        if (!byDay.has(m.date)) byDay.set(m.date, []);
+        byDay.get(m.date).push(m);
+    });
+    const isFlag = d => d === currentFlagDate;
+    notesBody.innerHTML = Array.from(byDay.entries()).map(([day, list]) => {
+        // 该日不是交易日（周末/节假日公告，K 线上没有对应蜡烛）：仅列出，不打点
+        const marked = currentChartItems.some(d => d.date === day);
+        if (!marked) noName.push(day);
+        const titles = list.map(m =>
+            `<a href="${escapeHtml(m.url)}" target="_blank" rel="noopener">${escapeHtml(m.title)}</a>`
+        ).join('；');
+        const cls = `kline-notes-day${isFlag(day) ? ' is-flag' : ''}${marked ? '' : ' not-traded'}`;
+        const titleAttr = marked ? '在 K 线上定位' : '非交易日，图上无对应 K 线';
+        return `<div class="${cls}">` +
+            `<a href="#" class="kline-notes-date" data-date="${escapeHtml(day)}" title="${titleAttr}">${fmtFlagDate(day)}</a>` +
+            `<span class="kline-notes-titles">${list.length > 1 ? `[${list.length}条] ` : ''}${titles}</span></div>`;
+    }).join('');
+    if (noName.length) {
+        notesCount.textContent += ` · 其中 ${noName.length} 天为非交易日（只列出，图上无 K 线）`;
+    }
+    notesPanel.hidden = false;
+}
+notesBody.addEventListener('click', event => {
+    const link = event.target.closest('a.kline-notes-date');
+    if (!link) return;
+    event.preventDefault();
+    // 非交易日：图上没有对应 K 线，只列出公告，不跳转
+    if (link.closest('.kline-notes-day')?.classList.contains('not-traded')) return;
+    focusNoteDate(link.dataset.date);
+});
+// 点击列表日期：若该日不在当前 K 线区间内，则以该日为截止日重新加载
+async function focusNoteDate(day) {
+    if (!day || !currentChartCode) return;
+    const idx = currentChartItems.findIndex(d => d.date === day);
+    if (idx < 0) {
+        currentChartEndDate = day; currentChartLatest = false;
+        statusEl.style.display = 'grid'; statusEl.textContent = `正在加载截至${day}的行情…`;
+        try {
+            const data = await fetchKline(currentChartCode, null, currentChartDays, day);
+            if (!data.items.length) throw new Error('该日期前没有可显示的日线数据');
+            currentChartItems = data.items;
+            currentChartEndDate = data.items[data.items.length - 1].date;
+            setKlineMeta(currentChartDays, data, ` · 截止 ${currentChartEndDate}`);
+            statusEl.style.display = 'none';
+            updateDateControls();
+            drawKline(currentChartItems);
+            renderNotesPanel();
+        } catch (error) { statusEl.textContent = error.message; }
+        return;
+    }
+    // 区间内：直接把该日的高亮提示框（当天消息）弹出来
+    const hit = noteIconHits.find(h => h.date === day);
+    if (!hit) return;
+    currentFlagDate = day;
+    msgShownKey = '';
+    // 提示框定位借用旗杆日图标锚点：优先用消息标注点坐标
+    flagIconHit = {x: hit.x, y: chartGeom.top + 40, r: hit.r, index: hit.index};
+    loadFlagMessages();
+}
 function hideFlagMsg() { clearTimeout(msgTimer); msgTimer = null; if (msgBox) msgBox.hidden = true; }
 function hideFlagMsgSoon() { if (!msgBox || msgBox.hidden) return; clearTimeout(msgTimer); msgTimer = setTimeout(hideFlagMsg, 140); }
 function positionFlagMsg() {
@@ -1181,7 +1544,8 @@ function positionFlagMsg() {
     msgBox.style.top = topPos + 'px';
 }
 function renderFlagMsg(items, failedMessage = '') {
-    const head = `<div class="kline-msg-title">旗杆日 ${fmtFlagDate(currentFlagDate)} · 当天重要消息（${items.length}条）</div>`;
+    const label = currentNoteMode === 'year' ? '消息日' : '旗杆日';
+    const head = `<div class="kline-msg-title">${label} ${fmtFlagDate(currentFlagDate)} · 当天重要消息（${items.length}条）</div>`;
     if (failedMessage) {
         msgBox.innerHTML = head + `<div class="kline-msg-empty">消息加载失败：${escapeHtml(failedMessage)}</div>`;
     } else if (!items.length) {
@@ -1341,6 +1705,18 @@ canvas.addEventListener('mousemove', event => {
     const idx = Math.floor((mx - chartGeom.left) / chartGeom.step);
     showKlineHover(idx, event.clientX, event.clientY);
     drawCrosshair(idx, mx, my);
+});
+// 消息日悬停：光标靠近标注点（或落在有公告的蜡烛上）即弹出当天消息
+canvas.addEventListener('mousemove', event => {
+    if (currentNoteMode !== 'year' || !chartGeom || !noteIconHits.length) { hideFlagMsgSoon(); return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+    const hit = noteIconHits.find(h => Math.hypot(mx - h.x, my - h.y) <= h.r + 4)
+        || noteIconHits.find(h => Math.abs(mx - h.x) <= chartGeom.step / 2 && my >= chartGeom.top && my <= chartGeom.bottom);
+    if (!hit) { hideFlagMsgSoon(); return; }
+    if (currentFlagDate !== hit.date) { currentFlagDate = hit.date; msgShownKey = ''; }
+    flagIconHit = {x: hit.x, y: chartGeom.top + 40, r: hit.r, index: hit.index};
+    showFlagMsg();
 });
 canvas.addEventListener('mouseleave', hideKlineHover);
 canvas.addEventListener('mouseleave', event => {

@@ -25,9 +25,11 @@ def _init_db():
     import stockPolicy as sp
     import announcements as ann
     import db_utils
+    import industries as ind
     sp.createSignalTable()
     sp.ensureStocksNameColumn()
     ann.createAnnouncementTable()
+    ind.ensure_industry_column()
     db_utils.ensure_execution_status_table()
 
 
@@ -285,6 +287,9 @@ def _load_yearly_double_results():
         # 逐只在 Python 中复现"低点后高点翻倍"判定，返回行数从百万级降到数千级。
         items = []
         names = _load_stock_names(cursor, candidates)
+        # 剔除退市股（简称 '退市XX' / 'XX退'），避免退市整理期异常价格被计入翻倍股。
+        import stockPolicy as sp
+        candidates = [c for c in candidates if not sp._is_delisted(names.get(c, ''))]
         batch_size = 500
         for i in range(0, len(candidates), batch_size):
             batch = candidates[i:i + batch_size]
@@ -469,6 +474,8 @@ def _compute_combined_strategy(date_str, cache_key, now):
 
     raw_rows = cursor.fetchall()
     name_map = _load_stock_names(cursor, [r[1] for r in raw_rows])
+    import stockPolicy as _sp
+    raw_rows = [r for r in raw_rows if not _sp._is_delisted(name_map.get(r[1], ''))]
 
     for row_data in raw_rows:
         (symbol, st_code, today_open, today_high, today_low,
@@ -525,6 +532,10 @@ def _compute_combined_strategy(date_str, cache_key, now):
             item['closes'].append(float(closep))
             item['vols'].append(float(vol or 0))
             item['amounts'].append(float(amount or 0))
+
+        # 剔除退市股，避免其历史价格参与筛选举例。
+        for _code in [c for c, v in grouped.items() if _sp._is_delisted(v['name'])]:
+            del grouped[_code]
 
         # 批量取流通股本（腾讯），用于计算换手率
         float_shares = _tencent_float_shares(list(grouped.keys()))
@@ -777,6 +788,233 @@ async def yearly_double_data():
     return _load_yearly_double_results()
 
 
+@app.get("/api/range-gain", tags=["data"])
+async def range_gain_data(days: int = 10, pct: float = 30.0):
+    """最近 A 个交易日内，区间首尾累计涨幅 >= B% 的所有股票。"""
+    return _load_range_gain_results(days, pct)
+
+
+def _recent_trade_dates(cursor, days):
+    """返回最近 days 个交易日，按时间升序。"""
+    cursor.execute(
+        "SELECT DISTINCT trade_date FROM st_daily ORDER BY trade_date DESC LIMIT %s",
+        (days,),
+    )
+    return sorted(r['trade_date'] for r in cursor.fetchall())
+
+
+def _load_range_gain_results(days=10, pct=30.0):
+    """最近 days 个交易日，按首尾收盘价计算累计涨幅 >= pct% 的所有股票。
+
+    与年度翻倍股一致：剔除退市股，结果不截断（全部返回）。
+    """
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 10
+    try:
+        pct = float(pct)
+    except (TypeError, ValueError):
+        pct = 30.0
+    days = max(1, min(days, 250))
+
+    result = {
+        'available': False,
+        'days': days,
+        'pct': pct,
+        'start_date': '',
+        'end_date': '',
+        'scanned': 0,
+        'count': 0,
+        'items': [],
+    }
+    db = _connect_db(timeout_seconds=120)
+    try:
+        cursor = db.cursor(pymysql.cursors.DictCursor)
+        cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (120 * 1000,))
+        dates = _recent_trade_dates(cursor, days)
+        if not dates:
+            return result
+        start_date, end_date = dates[0], dates[-1]
+
+        # 首日与末日各取一次收盘价，按代码对齐；要求两日都有有效收盘价。
+        cursor.execute(
+            "SELECT s.ts_code, s.closep AS start_close, e.closep AS end_close "
+            "FROM st_daily s JOIN st_daily e ON e.ts_code = s.ts_code "
+            "WHERE s.trade_date = %s AND e.trade_date = %s "
+            "AND s.closep > 0 AND e.closep > 0",
+            (start_date, end_date),
+        )
+        raw = cursor.fetchall()
+
+        import stockPolicy as sp
+        names = _load_stock_names(cursor, [r['ts_code'] for r in raw])
+
+        items = []
+        scanned = 0
+        for r in raw:
+            st_code = r['ts_code']
+            name = names.get(st_code, '')
+            if sp._is_delisted(name):
+                continue
+            scanned += 1
+            start_close = float(r['start_close'])
+            end_close = float(r['end_close'])
+            gain_pct = (end_close / start_close - 1) * 100
+            if gain_pct >= pct:
+                items.append({
+                    'st_code': st_code,
+                    'name': name,
+                    'eastmoney_url': _eastmoney_url(st_code),
+                    'start_date': start_date,
+                    'start_close': round(start_close, 2),
+                    'end_date': end_date,
+                    'end_close': round(end_close, 2),
+                    'gain_pct': round(gain_pct, 2),
+                    'industry': '',
+                })
+
+        # 补充行业板块（按需抓取并缓存，仅针对命中股票）
+        if items:
+            try:
+                import industries as ind
+                ind_map = ind.ensure_industries([it['st_code'] for it in items])
+                for it in items:
+                    it['industry'] = ind_map.get(it['st_code'], '') or ''
+            except Exception:
+                pass
+
+        items.sort(key=lambda item: item['gain_pct'], reverse=True)
+        result.update({
+            'available': True,
+            'start_date': start_date,
+            'end_date': end_date,
+            'scanned': scanned,
+            'count': len(items),
+            'items': items,
+        })
+        return result
+    finally:
+        db.close()
+
+
+_fund_cache = {}
+
+
+def _datacenter_fundamentals(st_code):
+    """东财 datacenter 主要财务指标（最新报告期），免 token、稳定可用。"""
+    symbol = st_code.split('.')[0]
+    params = {
+        'reportName': 'RPT_F10_FINANCE_MAINFINADATA',
+        'columns': ('SECURITY_CODE,SECURITY_NAME_ABBR,REPORT_DATE,REPORT_DATE_NAME,'
+                    'PARENTNETPROFIT,PARENTNETPROFITTZ,TOTALOPERATEREVE,TOTALOPERATEREVETZ,'
+                    'ROEJQ,XSMLL,XSJLL,EPSJB'),
+        'pageSize': 1,
+        'pageNumber': 1,
+        'filter': f'(SECURITY_CODE="{symbol}")',
+        'sortColumns': 'REPORT_DATE',
+        'sortTypes': '-1',
+    }
+    resp = requests.get(
+        'https://datacenter-web.eastmoney.com/api/data/v1/get',
+        params=params,
+        headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://data.eastmoney.com/'},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    rows = ((resp.json() or {}).get('result') or {}).get('data') or []
+    if not rows:
+        return {}
+    r = rows[0]
+
+    def yi(v):
+        return round(float(v) / 1e8, 2) if v not in (None, '', '-') else None
+
+    def pct(v):
+        return round(float(v), 2) if v not in (None, '', '-') else None
+
+    report_date = str(r.get('REPORT_DATE') or '')[:10].replace('-', '')
+    return {
+        'name': r.get('SECURITY_NAME_ABBR') or '',
+        'report_name': r.get('REPORT_DATE_NAME') or '',
+        'report_date': report_date,
+        'net_profit': yi(r.get('PARENTNETPROFIT')),
+        'revenue': yi(r.get('TOTALOPERATEREVE')),
+        'profit_yoy': pct(r.get('PARENTNETPROFITTZ')),
+        'revenue_yoy': pct(r.get('TOTALOPERATEREVETZ')),
+        'roe': pct(r.get('ROEJQ')),
+        'gross_margin': pct(r.get('XSMLL')),
+        'net_margin': pct(r.get('XSJLL')),
+        'eps': pct(r.get('EPSJB')),
+        'pe': None,
+        'pb': None,
+        'main_net_pct': None,
+    }
+
+
+def _get_fundamentals_cached(st_code, ttl=1800):
+    """最新财务指标：优先东财行情接口，失败时回退 datacenter 报表；缓存 30 分钟。"""
+    now = time.time()
+    hit = _fund_cache.get(st_code)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    data = {}
+    try:
+        data = _eastmoney_quote_fundamentals(st_code) or {}
+    except Exception:
+        data = {}
+    if not data.get('net_profit') and not data.get('revenue'):
+        try:
+            fallback = _datacenter_fundamentals(st_code)
+            for key, value in fallback.items():
+                if data.get(key) in (None, '') and value not in (None, ''):
+                    data[key] = value
+        except Exception:
+            pass
+    _fund_cache[st_code] = (now, data)
+    return data
+
+
+@app.get("/api/kline-tags/{st_code}", tags=["data"])
+def kline_tags(st_code: str, start: str = '', end: str = ''):
+    """K线弹窗标签：行业板块 + 最新财务指标 + 区间内公司消息。"""
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code):
+        return JSONResponse({"error": "股票代码不正确"}, status_code=400)
+    if start and not re.fullmatch(r"\d{8}", start):
+        return JSONResponse({"error": "起始日期格式不正确"}, status_code=400)
+    if end and not re.fullmatch(r"\d{8}", end):
+        return JSONResponse({"error": "结束日期格式不正确"}, status_code=400)
+
+    result = {
+        'st_code': st_code,
+        'start_date': start,
+        'end_date': end,
+        'industry': '',
+        'fundamental': None,
+        'messages': [],
+        'message_count': 0,
+    }
+    try:
+        import industries as ind
+        result['industry'] = ind.ensure_industries([st_code]).get(st_code, '') or ''
+    except Exception as exc:
+        result['industry_error'] = f'行业查询失败: {exc}'
+    try:
+        result['fundamental'] = _get_fundamentals_cached(st_code)
+    except Exception as exc:
+        result['fundamental_error'] = f'业绩查询失败: {exc}'
+    if start and end:
+        try:
+            import announcements as ann
+            messages = ann.getMessagesInRange(st_code, start, end)
+            result['messages'] = messages
+            result['message_count'] = len(messages)
+        except Exception as exc:
+            result['announcements_error'] = f'公告查询失败: {exc}'
+    return result
+
+
 @app.get("/api/search-stock", tags=["data"])
 async def search_stock(q: str = '', limit: int = 10):
     """按股票代码或名称模糊搜索，返回候选列表。"""
@@ -878,6 +1116,30 @@ def stock_messages(st_code: str, ann_date: str, refresh: int = 0):
     return {"st_code": st_code, "date": ann_date, "items": items}
 
 
+@app.get("/api/messages/{st_code}", tags=["data"])
+def stock_messages_year(st_code: str, days: int = 365):
+    """取指定股票近 N 天（默认一年）的公告，供 K 线面板按日期标注与列举。
+
+    返回：messages=[{date,title,url,...}]，by_date={date: 条数} 便于前端打点。
+    """
+    st_code = st_code.upper()
+    if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code):
+        return JSONResponse({"error": "参数不正确"}, status_code=400)
+    days = max(30, min(days, 730))
+    end_date = time.strftime('%Y%m%d')
+    start_date = (datetime.date.today() - datetime.timedelta(days=days)).strftime('%Y%m%d')
+    import announcements as ann
+    try:
+        items = ann.getMessagesInRange(st_code, start_date, end_date)
+    except Exception as exc:
+        return JSONResponse({"error": f"公告查询失败: {exc}"}, status_code=502)
+    by_date = {}
+    for item in items:
+        by_date[item['date']] = by_date.get(item['date'], 0) + 1
+    return {"st_code": st_code, "start_date": start_date, "end_date": end_date,
+            "messages": items, "by_date": by_date}
+
+
 # 手动更新K线：后台线程执行，接口立即返回，前端轮询 /api/update-kline/status 展示进度
 @app.post("/api/update-kline", tags=["data"])
 def update_kline():
@@ -951,9 +1213,9 @@ def smooth_reason(st_code: str, start_date: str, end_date: str):
 
     result = {"st_code": st_code, "start_date": start_date, "end_date": end_date}
 
-    # 1) 行业 + 经营业绩（东财）
+    # 1) 行业 + 经营业绩（东财；行情接口失败时回退 datacenter 报表）
     try:
-        result["fundamental"] = _eastmoney_quote_fundamentals(st_code)
+        result["fundamental"] = _get_fundamentals_cached(st_code)
     except Exception as exc:
         result["fundamental_error"] = f"行业/业绩查询失败: {exc}"
 
