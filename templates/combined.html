@@ -23,6 +23,10 @@
         .range-query input[type="date"] { margin-left: 6px; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; width: 150px; }
         .range-query input:disabled { background: #f5f5f5; color: #bfbfbf; cursor: not-allowed; }
         .range-or { color: #999; font-size: 13px; }
+        .ks-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 3px 9px; border: 1px solid #91caff; border-radius: 11px; background: #e6f4ff; color: #0958d9; font-size: 12px; line-height: 1.5; cursor: pointer; font-variant-numeric: tabular-nums; }
+        .ks-chip:hover { background: #bae0ff; }
+        .ks-chip .ks-sim { color: #389e0d; font-weight: 600; margin-left: 4px; }
+        .ks-preview-label { margin: 8px 0 4px; color: #888; font-size: 12px; }
         .range-query button { padding: 8px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .range-query button:disabled { background: #bfbfbf; cursor: not-allowed; }
         .btn-update-k-line { padding: 8px 20px; margin-left: 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; background: #52c41a; color: #fff; }
@@ -311,6 +315,7 @@
         <div class="tab" onclick="switchTab(event, 'surge')">放量涨幅 ({{ data.s1 | length }})</div>
         <div class="tab" onclick="switchTab(event, 'yearly-double')">年度翻倍股 (<span id="yearly-double-tab-count">{{ yearly_double.count }}</span>)</div>
         <div class="tab" onclick="switchTab(event, 'range-gain')">区间涨幅查询 (<span id="range-gain-tab-count">-</span>)</div>
+        <div class="tab" onclick="switchTab(event, 'kline-search')">K线图查询 (<span id="kline-search-tab-count">-</span>)</div>
         <div class="tab" onclick="switchTab(event, 'backtest')">回测结果{% if backtest.available %} ({{ backtest.signal_count }}){% endif %}</div>
     </div>
 
@@ -623,6 +628,28 @@
         <div class="empty" id="range-gain-empty">填写「交易日数 A」或「交易起日 / 交易讫日」（二选一）并设置涨幅 B%，点击“查询”后显示结果。</div>
     </div>
 
+    <div class="panel" id="panel-kline-search">
+        <div class="strategy-note">上传一张K线截图（红涨绿跌），点击“查询”后扫描全市场，列出走势形态与截图相似的历史区间。<br>相似度算法：从截图提取每根K线的开高低收，把窗口按自身最高/最低价归一化到 0~1 后，计算与截图的形状误差 RMSE，<b>相似度 = 1 − RMSE</b>，只看轮廓与节奏，不看绝对价位。<br>上传后会显示「识别出的形态」，请先核对它与原图一致；若不一致，说明截图配色或清晰度不适用。<br>点击相似区间或“K线”，即从该区间起点开始展示K线。建议截图含 20~120 根清晰K线，阈值 92% 较严格，90~91% 结果更多。</div>
+        <div class="range-query">
+            <button type="button" id="ks-upload-btn" onclick="document.getElementById('ks-file').click()">上传图片</button>
+            <input type="file" id="ks-file" accept="image/*" hidden onchange="onKlineImageChosen(this)">
+            <label>相似度阈值：<input type="number" id="ks-threshold" value="92" min="50" max="100" step="1"> %</label>
+            <button type="button" class="btn-primary" id="ks-run" onclick="runKlineSearch()" disabled>查询</button>
+            <span class="kline-tags-label" id="ks-status"></span>
+        </div>
+        <div id="ks-preview-wrap" style="display:none;padding:0 0 12px 0;">
+            <div class="ks-preview-label">原图</div>
+            <img id="ks-preview" alt="上传的K线截图" style="max-width:100%;max-height:240px;border:1px solid #eee;border-radius:6px;">
+            <div class="ks-preview-label" id="ks-recognized-label" style="display:none;">识别出的形态（用于比对，请核对是否与原图一致）</div>
+            <img id="ks-recognized" alt="识别出的K线形态" style="display:none;max-width:100%;border:1px solid #eee;border-radius:6px;background:#fff;">
+        </div>
+        <div class="table-scroll" id="ks-table-wrap" style="display:none;"><table>
+            <thead><tr><th>#</th><th>股票</th><th>名称</th><th>行业板块</th><th>相似区间（点击从该区间开始看K线）</th><th>最高相似度</th></tr></thead>
+            <tbody id="ks-body"></tbody>
+        </table></div>
+        <div class="empty" id="ks-empty">尚未上传图片。点击“上传图片”选择K线截图。</div>
+    </div>
+
     <div class="panel" id="panel-backtest">
         {% if backtest.available %}
         <div class="backtest-verdict"><strong>结论：</strong>{{ backtest.conclusion }}</div>
@@ -838,6 +865,9 @@ const notesBody = document.getElementById('kline-notes-body');
 const notesCount = document.getElementById('kline-notes-count');
 // K 线顶部标签条（行业板块 / 最新业绩 / 区间消息）
 let currentTagRange = null;    // {start, end} 或 null
+// K线图查询面板：从相似区间起点开始展示（YYYYMMDD），为空时按截止日展示
+let currentKlineStart = '';
+let klineNavMatchStarts = [];
 let tagLoadToken = 0;
 const tagsBar = document.getElementById('kline-tags');
 // 记录来源列表（按当前排序后的 DOM 顺序），供 ▲▼ / PgUp/PgDn 切换上下只股票
@@ -849,9 +879,10 @@ function setKlineNav(triggerEl, code) {
         klineNavCodes = buttons.map(b => b.dataset.code);
         klineNavFlagDates = buttons.map(b => b.dataset.flagDate || '');
         klineNavNoteModes = buttons.map(b => b.dataset.noteMode || '');
+        klineNavMatchStarts = buttons.map(b => b.dataset.matchStart || '');
         klineNavIndex = klineNavCodes.indexOf(code);
     } else {
-        klineNavCodes = []; klineNavFlagDates = []; klineNavNoteModes = []; klineNavIndex = -1;
+        klineNavCodes = []; klineNavFlagDates = []; klineNavNoteModes = []; klineNavMatchStarts = []; klineNavIndex = -1;
     }
     updateKlineNav();
 }
@@ -897,6 +928,7 @@ async function stepKlineStock(delta) {
     klineNavIndex = ((klineNavIndex + delta) % n + n) % n;
     currentFlagDate = klineNavFlagDates[klineNavIndex] || '';
     currentNoteMode = klineNavNoteModes[klineNavIndex] || '';
+    currentKlineStart = klineNavMatchStarts[klineNavIndex] || '';
     updateKlineNav();
     await openKline(klineNavCodes[klineNavIndex], null, true);
 }
@@ -907,6 +939,7 @@ async function openKline(code, triggerEl, keepNav = false) {
         // 小旗杆面板的按钮带 data-flag-date；放量涨幅面板的按钮带 data-note-mode="year"
         currentFlagDate = (triggerEl && triggerEl.dataset && triggerEl.dataset.flagDate) || '';
         currentNoteMode = (triggerEl && triggerEl.dataset && triggerEl.dataset.noteMode) || '';
+        currentKlineStart = (triggerEl && triggerEl.dataset && triggerEl.dataset.matchStart) || '';
         // 区间涨幅面板的 K线按钮带 data-tag-mode="range"，用于展示行业/业绩/区间消息标签
         const tagMode = (triggerEl && triggerEl.dataset && triggerEl.dataset.tagMode) || '';
         currentTagRange = (tagMode === 'range')
@@ -936,7 +969,7 @@ async function openKline(code, triggerEl, keepNav = false) {
         document.getElementById('chart-title').textContent = `${code} ${data.name || ''}`;
         currentChartItems = data.items;
         currentChartEndDate = data.items[data.items.length - 1].date;
-        setKlineMeta(currentChartDays, data);
+        setKlineMeta(currentChartDays, data, currentKlineStart ? ` · 相似区间起点 ${fmtYmd(currentKlineStart)}` : '');
         updateDateControls();
         statusEl.style.display = 'none'; drawKline(currentChartItems);
         // 放量涨幅面板：加载近一年消息，在 K 线上逐日标注并列出清单
@@ -950,6 +983,7 @@ async function showLatestKline() {
     const button = document.getElementById('chart-latest');
     if (button.disabled) return;   // 连按 Enter 时不重复发起请求
     button.disabled = true; statusEl.style.display = 'grid'; statusEl.textContent = '正在加载最新行情…';
+    currentKlineStart = '';
     try {
         const response = await fetch(`/api/kline/${encodeURIComponent(currentChartCode)}?days=${currentChartDays}`);
         const data = await response.json();
@@ -966,6 +1000,7 @@ async function showLatestKline() {
 }
 async function shiftKlineDate(direction) {
     if (!currentChartCode || !currentChartEndDate) return;
+    currentKlineStart = '';
     const button = document.getElementById(direction < 0 ? 'date-prev' : 'date-next');
     button.disabled = true; statusEl.style.display = 'grid'; statusEl.textContent = direction < 0 ? '正在加载前一交易日…' : '正在加载后一交易日…';
     try {
@@ -1116,10 +1151,14 @@ document.addEventListener('keydown', event => {
     }
 });
 async function fetchKline(code, signal, days = 120, endDate = '{{ data.today }}') {
-    const cacheKey = `${code}|${days}|${endDate || 'latest'}`;
+    // 有相似区间起点时从起点（含）向后取 days 根；否则按截止日向前取
+    const startDate = currentKlineStart || '';
+    const cacheKey = startDate ? `${code}|${days}|from:${startDate}` : `${code}|${days}|${endDate || 'latest'}`;
     if (klineCache.has(cacheKey)) return klineCache.get(cacheKey);
-    const endParam = endDate ? `&end_date=${encodeURIComponent(endDate)}` : '';
-    const response = await fetch(`/api/kline/${encodeURIComponent(code)}?days=${days}${endParam}`, {signal});
+    const rangeParam = startDate
+        ? `&start_date=${encodeURIComponent(startDate)}`
+        : (endDate ? `&end_date=${encodeURIComponent(endDate)}` : '');
+    const response = await fetch(`/api/kline/${encodeURIComponent(code)}?days=${days}${rangeParam}`, {signal});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '行情请求失败');
     klineCache.set(cacheKey, data);
@@ -1338,6 +1377,145 @@ async function loadRangeGain() {
     } finally {
         if (runBtn) runBtn.disabled = false;
     }
+}
+// ---- K线图查询：上传截图 -> 全市场扫描相似形态 ----
+let ksImageId = '';
+let ksPollTimer = null;
+function ksSetStatus(text, isError) {
+    const el = document.getElementById('ks-status');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? '#cf1322' : '#888';
+    el.style.fontWeight = isError ? '600' : '400';
+}
+function ksShowEmpty(text) {
+    document.getElementById('ks-table-wrap').style.display = 'none';
+    const empty = document.getElementById('ks-empty');
+    empty.textContent = text;
+    empty.style.display = 'block';
+}
+async function onKlineImageChosen(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { ksSetStatus('请选择图片文件（PNG/JPG）', true); return; }
+    if (file.size > 8 * 1024 * 1024) { ksSetStatus('图片超过 8MB，请压缩或裁剪后再上传', true); return; }
+    ksImageId = '';
+    document.getElementById('ks-run').disabled = true;
+    document.getElementById('ks-recognized').style.display = 'none';
+    document.getElementById('ks-recognized-label').style.display = 'none';
+    ksSetStatus('正在识别K线…');
+    const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('读取图片失败'));
+        reader.readAsDataURL(file);
+    }).catch(error => { ksSetStatus(error.message, true); return null; });
+    if (!dataUrl) return;
+    document.getElementById('ks-preview').src = dataUrl;
+    document.getElementById('ks-preview-wrap').style.display = 'block';
+    try {
+        const response = await fetch('/api/kline-search/upload', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({image: dataUrl}),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '图片识别失败');
+        ksImageId = result.image_id;
+        if (result.preview) {
+            const rec = document.getElementById('ks-recognized');
+            rec.src = result.preview;
+            rec.style.display = 'block';
+            document.getElementById('ks-recognized-label').style.display = 'block';
+        }
+        ksSetStatus(`已识别 ${result.candles} 根K线，点击“查询”开始扫描`);
+        document.getElementById('ks-run').disabled = false;
+    } catch (error) {
+        ksSetStatus(`识别失败：${error.message}`, true);
+        document.getElementById('ks-run').disabled = true;
+    }
+}
+async function runKlineSearch() {
+    const runBtn = document.getElementById('ks-run');
+    if (!ksImageId || runBtn.disabled) return;
+    const threshold = parseFloat(document.getElementById('ks-threshold').value);
+    if (!Number.isFinite(threshold)) { ksSetStatus('请输入有效的相似度阈值', true); return; }
+    runBtn.disabled = true;
+    ksSetStatus('正在扫描全市场…');
+    ksShowEmpty('正在扫描全市场股票，通常需要几十秒…');
+    try {
+        const response = await fetch('/api/kline-search/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({image_id: ksImageId, threshold}),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            const err = new Error(result.error || '发起查询失败');
+            err.expired = response.status === 404;
+            throw err;
+        }
+        ksPoll(result.job_id);
+    } catch (error) {
+        ksSetStatus(error.message, true);
+        ksShowEmpty(error.message);
+        if (error.expired) {
+            ksImageId = '';
+            ksSetStatus('图片已失效（服务可能重启过），请重新上传图片', true);
+        }
+        runBtn.disabled = false;
+    }
+}
+function ksPoll(jobId) {
+    clearTimeout(ksPollTimer);
+    ksPollTimer = setTimeout(async () => {
+        try {
+            const response = await fetch(`/api/kline-search/job/${encodeURIComponent(jobId)}`);
+            const job = await response.json();
+            if (!response.ok) throw new Error(job.error || '查询任务异常');
+            if (job.status === 'running') {
+                if (job.stage === 'loading') {
+                    ksSetStatus('正在加载全市场行情（首次加载需要数分钟）…');
+                } else {
+                    const pct = job.total ? Math.floor(job.processed * 100 / job.total) : 0;
+                    ksSetStatus(`扫描中 ${job.processed}/${job.total}（${pct}%）`);
+                }
+                ksPoll(jobId);
+                return;
+            }
+            if (job.status === 'error') throw new Error(job.error || '扫描失败');
+            ksRenderResults(job);
+        } catch (error) {
+            ksSetStatus(error.message);
+            ksShowEmpty(error.message);
+            document.getElementById('ks-run').disabled = false;
+        }
+    }, 1200);
+}
+function ksRenderResults(job) {
+    document.getElementById('ks-run').disabled = false;
+    document.getElementById('kline-search-tab-count').textContent = job.count;
+    if (!job.results.length) {
+        ksSetStatus(`完成：没有相似度 ≥ ${job.threshold}% 的股票`);
+        ksShowEmpty(`全市场没有相似度 ≥ ${job.threshold}% 的形态，可降低阈值后重试。`);
+        return;
+    }
+    ksSetStatus(`完成：${job.count} 只股票出现相似形态（阈值 ${job.threshold}%）`);
+    document.getElementById('ks-body').innerHTML = job.results.map((r, index) => {
+        const best = r.matches.reduce((a, b) => (b.similarity > a.similarity ? b : a), r.matches[0]);
+        const chips = r.matches.map(m => `<button type="button" class="ks-chip kline-match-trigger" data-code="${escapeHtml(r.st_code)}" data-match-start="${escapeHtml(m.start_date)}" data-match-end="${escapeHtml(m.end_date)}" onclick="openKline('${escapeHtml(r.st_code)}', this)">${escapeHtml(fmtYmd(m.start_date))} ~ ${escapeHtml(fmtYmd(m.end_date))}<span class="ks-sim">${Number(m.similarity).toFixed(1)}%</span></button>`).join('');
+        return `<tr>
+            <td>${index + 1}</td>
+            <td class="code"><a href="${escapeHtml(r.eastmoney_url || '#')}" target="_blank" rel="noopener">${escapeHtml(r.st_code)}</a><button class="kline-trigger" data-code="${escapeHtml(r.st_code)}" data-match-start="${escapeHtml(best.start_date)}" data-match-end="${escapeHtml(best.end_date)}" onclick="openKline('${escapeHtml(r.st_code)}', this)">K线</button></td>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${r.industry ? `<span class="tag tag-blue">${escapeHtml(r.industry)}</span>` : '-'}</td>
+            <td>${chips}</td>
+            <td><span class="tag tag-red">${Number(r.best_similarity).toFixed(1)}%</span></td>
+        </tr>`;
+    }).join('');
+    document.getElementById('ks-empty').style.display = 'none';
+    document.getElementById('ks-table-wrap').style.display = 'block';
 }
 // 年度翻倍股默认不查询，仅在点击面板内按钮后触发
 let suggestTimer = null;

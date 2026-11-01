@@ -7,7 +7,7 @@ import datetime
 import threading
 import pymysql
 import requests
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
@@ -26,11 +26,13 @@ def _init_db():
     import announcements as ann
     import db_utils
     import industries as ind
+    import kline_search as ks
     sp.createSignalTable()
     sp.ensureStocksNameColumn()
     ann.createAnnouncementTable()
     ind.ensure_industry_column()
     db_utils.ensure_execution_status_table()
+    ks.warm_up_async()
 
 
 # 内存缓存: {cache_key: (timestamp, data)}
@@ -441,7 +443,8 @@ def _compute_combined_strategy(date_str, cache_key, now):
     """真正的策略计算（无缓存），由 _run_combined_strategy 在锁内调用。"""
     db = _connect_db()
     cursor = db.cursor()
-    cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (_DB_TIMEOUT_SECONDS * 1000,))
+    # 首页含 30 日平缓上涨的大范围扫描，给足 45 秒，避免与后台任务抢 I/O 时误超时
+    cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (45 * 1000,))
 
     # 获取最新交易日和前一个交易日
     cursor.execute("SELECT MAX(trade_date) FROM st_daily")
@@ -1057,6 +1060,60 @@ def kline_tags(st_code: str, start: str = '', end: str = ''):
     return result
 
 
+@app.post("/api/kline-search/upload", tags=["data"])
+def kline_search_upload(payload: dict = Body(...)):
+    """上传 K 线截图，识别为形态模板，返回 image_id。"""
+    import kline_search as ks
+    try:
+        data = ks.decode_data_url(str(payload.get('image') or ''))
+    except Exception:
+        return JSONResponse({"error": "图片数据格式不正确"}, status_code=400)
+    if not data or len(data) > 8 * 1024 * 1024:
+        return JSONResponse({"error": "图片为空或超过 8MB"}, status_code=400)
+    try:
+        image_id, candles, preview = ks.store_pattern(data)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    return {"image_id": image_id, "candles": candles, "preview": preview}
+
+
+@app.post("/api/kline-search/run", tags=["data"])
+def kline_search_run(payload: dict = Body(...)):
+    """以已上传的形态模板扫描全市场，返回后台任务 job_id。"""
+    import kline_search as ks
+    try:
+        threshold = float(payload.get('threshold', 92)) / 100.0
+    except (TypeError, ValueError):
+        threshold = 0.92
+    threshold = max(0.5, min(threshold, 1.0))
+    try:
+        job_id = ks.start_job(str(payload.get('image_id') or ''), threshold)
+    except KeyError as exc:
+        return JSONResponse({"error": str(exc.args[0]) if exc.args else '图片已失效'}, status_code=404)
+    return {"job_id": job_id}
+
+
+@app.get("/api/kline-search/job/{job_id}", tags=["data"])
+def kline_search_job(job_id: str):
+    """查询扫描进度与结果（完成后才返回 results）。"""
+    import kline_search as ks
+    job = ks.get_job(job_id)
+    if job is None:
+        return JSONResponse({"error": "任务不存在"}, status_code=404)
+    done = job['status'] == 'done'
+    return {
+        "status": job['status'],
+        "stage": job['stage'],
+        "processed": job['processed'],
+        "total": job['total'],
+        "error": job['error'],
+        "candles": job['candles'],
+        "threshold": job['threshold'],
+        "count": job['matched_total'] if done else 0,
+        "results": job['results'] if done else [],
+    }
+
+
 @app.get("/api/search-stock", tags=["data"])
 async def search_stock(q: str = '', limit: int = 10):
     """按股票代码或名称模糊搜索，返回候选列表。"""
@@ -1089,25 +1146,39 @@ async def search_stock(q: str = '', limit: int = 10):
 
 
 @app.get("/api/kline/{st_code}", tags=["data"])
-async def kline_data(st_code: str, days: int = 60, end_date: str = ''):
-    """返回指定股票的 K 線與成交量資料。"""
+async def kline_data(st_code: str, days: int = 60, end_date: str = '', start_date: str = ''):
+    """返回指定股票的 K 線與成交量資料。
+
+    start_date 非空时从该交易日（含）开始向后取 days 根；否则以 end_date 为截止日向前取。
+    """
     st_code = st_code.upper()
     if not re.fullmatch(r"\d{6}\.(SZ|SH|BJ)", st_code):
         return JSONResponse({"error": "股票代碼格式不正確"}, status_code=400)
+    if start_date and not re.fullmatch(r"\d{8}", start_date):
+        return JSONResponse({"error": "起始日期格式不正确"}, status_code=400)
     days = max(20, min(days, 240))
     db = _connect_db()
     try:
         cursor = db.cursor()
         cursor.execute("SET SESSION MAX_EXECUTION_TIME=%s", (_DB_TIMEOUT_SECONDS * 1000,))
-        date_filter = "AND d.trade_date<=%s" if end_date else ""
-        params = (st_code, end_date, days) if end_date else (st_code, days)
-        cursor.execute(
-            "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,d.amount,"
-            "COALESCE(NULLIF(s.name,''),s.fullname,'') FROM st_daily d "
-            "LEFT JOIN stocks s ON s.st_code=d.ts_code "
-            f"WHERE d.ts_code=%s {date_filter} "
-            "ORDER BY d.trade_date DESC LIMIT %s", params)
-        rows = cursor.fetchall()[::-1]
+        if start_date:
+            cursor.execute(
+                "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,d.amount,"
+                "COALESCE(NULLIF(s.name,''),s.fullname,'') FROM st_daily d "
+                "LEFT JOIN stocks s ON s.st_code=d.ts_code "
+                "WHERE d.ts_code=%s AND d.trade_date>=%s "
+                "ORDER BY d.trade_date ASC LIMIT %s", (st_code, start_date, days))
+            rows = cursor.fetchall()
+        else:
+            date_filter = "AND d.trade_date<=%s" if end_date else ""
+            params = (st_code, end_date, days) if end_date else (st_code, days)
+            cursor.execute(
+                "SELECT d.trade_date,d.openp,d.high,d.low,d.closep,d.vol,d.amount,"
+                "COALESCE(NULLIF(s.name,''),s.fullname,'') FROM st_daily d "
+                "LEFT JOIN stocks s ON s.st_code=d.ts_code "
+                f"WHERE d.ts_code=%s {date_filter} "
+                "ORDER BY d.trade_date DESC LIMIT %s", params)
+            rows = cursor.fetchall()[::-1]
     finally:
         db.close()
     return {
